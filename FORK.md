@@ -7,6 +7,7 @@ A fork of [decolua/9router](https://github.com/decolua/9router) for running Clau
 - **Utilization gate.** Before a combo sends a request, it skips a model when every active account for that provider is at its cap: 95% used on a session or weekly window (including Weekly SuperGrok), or 25% spent on a credit-only account. Per-model meters (Claude `weekly opus (7d)`, Codex Spark) only count for that model. A missing, failed or slow usage read still sends the request.
 - **Retry-After and billing errors.** An upstream cooldown is forwarded as `Retry-After`, including through combos. A billing error (HTTP 402, or a 429 whose body says the balance is empty) does not enter the 429 backoff ladder, and the combo moves on to the next model.
 - **Local-only defaults.** `npm start` listens on `127.0.0.1` only, and the data directory is created owner-only (`0700`), since it holds provider tokens.
+- **Token refresh at boot.** Proactive OAuth refresh starts when the server starts. Upstream starts it only once the dashboard is opened.
 
 ## Set up on a new machine
 
@@ -85,4 +86,6 @@ git merge upstream/master
 cd tests && npm install && npx vitest run unit/utilization-gate.test.js unit/combo-retry-after.test.js unit/retry-after-backoff.test.js unit/glm-error-classification.test.js unit/upstream-retry-after.test.js
 ```
 
-Conflicts usually land in `open-sse/services/combo.js`, `src/sse/handlers/chat.js`, `open-sse/handlers/chatCore.js` and `open-sse/utils/error.js`. The full suite has about 96 upstream failures on a plain checkout. Compare against a run on the previous commit rather than expecting all green.
+Conflicts usually land in `open-sse/services/combo.js`, `src/sse/handlers/chat.js`, `open-sse/handlers/chatCore.js` and `open-sse/utils/error.js`. If upstream re-adds a background refresh start in `custom-server.js` or `initializeApp.js`, drop it: `src/instrumentation.js` is the only place that should start it.
+
+The full suite has about 74 known failures. Most are in providers this fork doesn't use (Kiro, Cursor, OpenCode, Kimchi, Cline, Windsurf, Antigravity). The rest are features upstream has turned off (search-aware combo reordering), tests that rely on a missing `cloud/` directory or a live endpoint, and translator strictness upstream never shipped, such as flattening text arrays to plain strings, which OpenAI-compatible upstreams accept either way. `db-concurrent` fails because usage logging drops a row identical to one in the same millisecond, and the test sends 100 identical rows at once. Compare against a run on the previous commit rather than expecting all green. If `golden-url-header` fails after a merge, check that the URL or header change is intended, then refresh the snapshot with `npx vitest run translator/golden-url-header.test.js -u`.
