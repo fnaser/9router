@@ -338,6 +338,13 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       } catch {
         // Ignore JSON parse errors
       }
+      // Model responses carry the cooldown as a Retry-After header (seconds), not in the body.
+      if (!retryAfter) {
+        const retryAfterSec = Number(result.headers?.get?.("Retry-After"));
+        if (Number.isFinite(retryAfterSec) && retryAfterSec > 0) {
+          retryAfter = new Date(Date.now() + retryAfterSec * 1000).toISOString();
+        }
+      }
 
       // Track earliest retryAfter across all combo models
       if (retryAfter && (!earliestRetryAfter || new Date(retryAfter) < new Date(earliestRetryAfter))) {
@@ -539,6 +546,22 @@ function collectPanel(calls, { minPanel, stragglerGraceMs, panelHardTimeoutMs })
   });
 }
 
+async function dropCappedModels(models, shouldSkipModel, log) {
+  if (typeof shouldSkipModel !== "function") return models;
+  const kept = [];
+  for (const model of models) {
+    let skip = false;
+    try {
+      skip = await shouldSkipModel(model);
+    } catch (error) {
+      log.warn("FUSION", `Utilization check failed for ${model}`, { error: error?.message || String(error) });
+    }
+    if (skip) log.info("FUSION", `Model ${model} at its utilization cap, leaving it out`);
+    else kept.push(model);
+  }
+  return kept;
+}
+
 /**
  * Handle a fusion combo: fan the prompt out to every panel model in parallel,
  * then a judge model synthesizes one final answer from all panel responses.
@@ -563,22 +586,6 @@ function collectPanel(calls, { minPanel, stragglerGraceMs, panelHardTimeoutMs })
  * @param {Function} [options.shouldSkipModel] - (modelStr) => Promise<boolean>. True leaves the model out of the panel.
  * @returns {Promise<Response>}
  */
-async function dropCappedModels(models, shouldSkipModel, log) {
-  if (typeof shouldSkipModel !== "function") return models;
-  const kept = [];
-  for (const model of models) {
-    let skip = false;
-    try {
-      skip = await shouldSkipModel(model);
-    } catch (error) {
-      log.warn("FUSION", `Utilization check failed for ${model}`, { error: error?.message || String(error) });
-    }
-    if (skip) log.info("FUSION", `Model ${model} at its utilization cap, leaving it out`);
-    else kept.push(model);
-  }
-  return kept;
-}
-
 export async function handleFusionChat({ body, models, handleSingleModel, log, comboName, judgeModel, tuning, shouldSkipModel = null }) {
   const requested = Array.isArray(models) ? models.filter(Boolean) : [];
   if (requested.length === 0) {

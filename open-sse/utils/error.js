@@ -138,12 +138,13 @@ export async function parseUpstreamError(response, executor = null) {
  * Create error result for chatCore handler
  * @param {number} statusCode - HTTP status code
  * @param {string} message - Error message
- * @param {number} [resetsAtMs] - Optional precise cooldown expiry (ms epoch) for provider-specific quota errors
+ * @param {number} [resetsAtMs] - Optional precise cooldown expiry (ms epoch) reported by the provider; drives the account lock
+ * @param {number|null} [retryAfterAtMs] - When to tell the client to retry; defaults to resetsAtMs, null sends no header
  * @returns {{ success: false, status: number, error: string, response: Response, resetsAtMs?: number }}
  */
-export function createErrorResult(statusCode, message, resetsAtMs) {
-  const retryAfterSec = Number.isFinite(resetsAtMs)
-    ? Math.max(Math.ceil((resetsAtMs - Date.now()) / 1000), 1)
+export function createErrorResult(statusCode, message, resetsAtMs, retryAfterAtMs = resetsAtMs) {
+  const retryAfterSec = Number.isFinite(retryAfterAtMs)
+    ? Math.max(Math.ceil((retryAfterAtMs - Date.now()) / 1000), 1)
     : undefined;
   return {
     success: false,
