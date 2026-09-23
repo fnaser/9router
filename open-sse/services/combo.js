@@ -275,9 +275,10 @@ export function getComboModelsFromData(modelStr, combosData) {
  * @param {string} [options.comboName] - Name of the combo (for round-robin tracking)
  * @param {string} [options.comboStrategy] - Strategy: "fallback" or "round-robin"
  * @param {number|string} [options.comboStickyLimit=1] - Requests per combo model before switching
+ * @param {Function} [options.shouldSkipModel] - (modelStr) => Promise<boolean>. True skips before the upstream call.
  * @returns {Promise<Response>}
  */
-export async function handleComboChat({ body, models, handleSingleModel, log, comboName, comboStrategy, comboStickyLimit = 1, autoSwitch = true }) {
+export async function handleComboChat({ body, models, handleSingleModel, log, comboName, comboStrategy, comboStickyLimit = 1, autoSwitch = true, shouldSkipModel = null }) {
   // Apply rotation strategy if enabled
   let rotatedModels = getRotatedModels(models, comboName, comboStrategy, comboStickyLimit);
 
@@ -300,6 +301,23 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
   for (let i = 0; i < rotatedModels.length; i++) {
     const modelStr = rotatedModels[i];
     log.info("COMBO", `Trying model ${i + 1}/${rotatedModels.length}: ${modelStr}`);
+
+    if (typeof shouldSkipModel === "function") {
+      let skip = false;
+      try {
+        skip = await shouldSkipModel(modelStr);
+      } catch (error) {
+        log.warn("COMBO", `Utilization check failed for ${modelStr}`, { error: error?.message || String(error) });
+      }
+      if (skip) {
+        log.info("COMBO", `Model ${modelStr} at >=95% utilization, trying next`);
+        if (!lastError) {
+          lastError = "utilization at or above 95%";
+          lastStatus = 503;
+        }
+        continue;
+      }
+    }
 
     try {
       const result = await handleSingleModel(body, modelStr);

@@ -24,6 +24,7 @@ import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { getProjectIdForConnection } from "open-sse/services/projectId.js";
 import { stripModelContextMarker } from "open-sse/utils/modelMarkers.js";
+import { shouldSkipComboModel } from "../services/utilizationSkip.js";
 
 /**
  * Handle chat completion request
@@ -134,7 +135,8 @@ export async function handleChat(request, clientRawRequest = null) {
       log,
       comboName: modelStr,
       comboStrategy,
-      comboStickyLimit
+      comboStickyLimit,
+      shouldSkipModel: shouldSkipComboModel,
     });
   }
 
@@ -211,7 +213,8 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         log,
         comboName: modelStr,
         comboStrategy,
-        comboStickyLimit
+        comboStickyLimit,
+        shouldSkipModel: shouldSkipComboModel,
       });
     }
     log.warn("CHAT", "Invalid model format", { model: modelStr });
