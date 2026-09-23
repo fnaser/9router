@@ -36,6 +36,15 @@ describe("utilization gate", () => {
     })).toBe(false);
   });
 
+  it("does not let a Codex side meter skip the chat window", () => {
+    expect(isAccountAtUtilizationCap({
+      session: { used: 10, total: 100, unlimited: false },
+      weekly: { used: 20, total: 100, unlimited: false },
+      review_weekly: { used: 99, total: 100, unlimited: false },
+      spark_session: { used: 100, total: 100, unlimited: false },
+    })).toBe(false);
+  });
+
   it("does not let a credit line skip a subscription that is still under 95%", () => {
     expect(isAccountAtUtilizationCap({
       "Weekly SuperGrok": { used: 10, total: 100, unlimited: false },

@@ -6,6 +6,12 @@ export const CREDIT_SKIP_RATIO = 0.25;
 
 const SUBSCRIPTION_QUOTA = /session|weekly/i;
 const CREDIT_QUOTA = /credit|on-demand|prepaid|monthly included/i;
+// Codex also reports review and Spark meters. Those are not the chat window.
+const SIDE_METER = /^(review|spark)[_\s-]/i;
+
+function isSubscriptionQuota(name) {
+  return SUBSCRIPTION_QUOTA.test(name) && !SIDE_METER.test(name);
+}
 
 function usedRatio(quota) {
   if (!quota || typeof quota !== "object") return null;
@@ -33,7 +39,7 @@ export function isAccountAtUtilizationCap(quotas) {
   for (const [name, quota] of Object.entries(quotas)) {
     const ratio = usedRatio(quota);
     if (ratio == null) continue;
-    if (SUBSCRIPTION_QUOTA.test(name)) subscription.push(ratio);
+    if (isSubscriptionQuota(name)) subscription.push(ratio);
     else if (CREDIT_QUOTA.test(name)) credits.push(ratio);
     else other.push(ratio);
   }
