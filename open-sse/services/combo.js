@@ -560,14 +560,40 @@ function collectPanel(calls, { minPanel, stragglerGraceMs, panelHardTimeoutMs })
  * @param {string} [options.comboName] - Combo name (logging)
  * @param {string} [options.judgeModel] - Judge model; falls back to panel[0]
  * @param {Object} [options.tuning] - Override FUSION_DEFAULTS (minPanel, grace, timeout)
+ * @param {Function} [options.shouldSkipModel] - (modelStr) => Promise<boolean>. True leaves the model out of the panel.
  * @returns {Promise<Response>}
  */
-export async function handleFusionChat({ body, models, handleSingleModel, log, comboName, judgeModel, tuning }) {
-  const panel = Array.isArray(models) ? models.filter(Boolean) : [];
-  if (panel.length === 0) {
+async function dropCappedModels(models, shouldSkipModel, log) {
+  if (typeof shouldSkipModel !== "function") return models;
+  const kept = [];
+  for (const model of models) {
+    let skip = false;
+    try {
+      skip = await shouldSkipModel(model);
+    } catch (error) {
+      log.warn("FUSION", `Utilization check failed for ${model}`, { error: error?.message || String(error) });
+    }
+    if (skip) log.info("FUSION", `Model ${model} at its utilization cap, leaving it out`);
+    else kept.push(model);
+  }
+  return kept;
+}
+
+export async function handleFusionChat({ body, models, handleSingleModel, log, comboName, judgeModel, tuning, shouldSkipModel = null }) {
+  const requested = Array.isArray(models) ? models.filter(Boolean) : [];
+  if (requested.length === 0) {
     return new Response(
       JSON.stringify({ error: { message: "Fusion combo has no models" } }),
       { status: 400, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
+  const panel = await dropCappedModels(requested, shouldSkipModel, log);
+  if (panel.length === 0) {
+    log.info("FUSION", "Every panel model is at its utilization cap");
+    return new Response(
+      JSON.stringify({ error: { message: "utilization cap reached" } }),
+      { status: 503, headers: { "Content-Type": "application/json" } }
     );
   }
 
@@ -578,7 +604,19 @@ export async function handleFusionChat({ body, models, handleSingleModel, log, c
 
   const cfg = { ...FUSION_DEFAULTS, ...(tuning || {}) };
   const minPanel = Math.min(Math.max(2, cfg.minPanel), panel.length);
-  const judge = judgeModel && judgeModel.trim() ? judgeModel.trim() : panel[0];
+  let judge = judgeModel && judgeModel.trim() ? judgeModel.trim() : panel[0];
+  if (typeof shouldSkipModel === "function") {
+    let judgeSkipped = false;
+    try {
+      judgeSkipped = await shouldSkipModel(judge);
+    } catch (error) {
+      log.warn("FUSION", `Utilization check failed for judge ${judge}`, { error: error?.message || String(error) });
+    }
+    if (judgeSkipped) {
+      log.info("FUSION", `Judge ${judge} at its utilization cap, using ${panel[0]}`);
+      judge = panel[0];
+    }
+  }
   log.info("FUSION", `Combo "${comboName}" | panel=${panel.length} [${panel.join(", ")}] | judge=${judge} | quorum=${minPanel}`);
 
   // 1. Fan out to the panel in parallel: non-streaming, tools stripped (we want prose).
