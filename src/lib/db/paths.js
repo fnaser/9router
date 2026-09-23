@@ -11,8 +11,20 @@ export const LEGACY_FILES = {
   disabled: path.join(DATA_DIR, "disabledModels.json"),
   details: path.join(DATA_DIR, "request-details.json"),
 };
+// The data dir holds provider OAuth tokens and API keys, so keep it owner-only.
+// chmod is a no-op on Windows, where the profile directory is already private.
 export function ensureDirs() {
   for (const dir of [DATA_DIR, DB_DIR, BACKUPS_DIR]) {
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    if (process.platform !== "win32") {
+      try { fs.chmodSync(dir, 0o700); } catch { /* not ours to change (e.g. a mounted volume) */ }
+    }
+  }
+}
+
+export function restrictDataFile() {
+  if (process.platform === "win32") return;
+  for (const file of [DATA_FILE, `${DATA_FILE}-wal`, `${DATA_FILE}-shm`]) {
+    try { fs.chmodSync(file, 0o600); } catch { /* missing until SQLite creates it */ }
   }
 }
