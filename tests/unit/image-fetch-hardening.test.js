@@ -2,7 +2,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mock DNS lookup so we control which host resolves to what IP.
 const lookupMock = vi.fn();
-vi.mock("node:dns/promises", () => ({ lookup: (...a) => lookupMock(...a) }));
+// The guard calls lookup(host, { all: true }), which resolves to an array of records.
+vi.mock("node:dns/promises", () => ({
+  lookup: async (...a) => {
+    const r = await lookupMock(...a);
+    return Array.isArray(r) ? r : [r];
+  },
+}));
 
 import { fetchImageAsBase64 } from "../../open-sse/translator/concerns/image.js";
 
@@ -24,6 +30,7 @@ function mockFetchOnce(bytes, ok = true) {
 beforeEach(() => {
   lookupMock.mockReset();
   lookupMock.mockResolvedValue({ address: "93.184.216.34" }); // public by default
+  mockFetchOnce(PNG); // a reachable image, so rejections can only come from the guard
 });
 afterEach(() => { vi.restoreAllMocks(); });
 

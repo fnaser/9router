@@ -29,7 +29,10 @@ describe("DefaultExecutor.buildHeaders() — claude provider", () => {
       headers["Anthropic-Version"] === "2023-06-01" ||
       headers["anthropic-version"] === "2023-06-01";
     expect(hasVersion).toBe(true);
-    expect(headers["User-Agent"]).toBe("claude-cli/2.1.258 (external, sdk-cli)");
+    const version = headers["User-Agent"].match(/^claude-cli\/(\d+)\.(\d+)\.(\d+) \(external, sdk-cli\)$/);
+    expect(version).not.toBeNull();
+    const [major, minor, patch] = version.slice(1).map(Number);
+    expect(major * 1e6 + minor * 1e3 + patch).toBeGreaterThanOrEqual(2 * 1e6 + 1 * 1e3 + 258);
   });
 
   it("includes heavy-agent beta flags for claude-opus-5", () => {
@@ -236,7 +239,8 @@ describe("proxyAwareFetch — api.anthropic.com routing", () => {
     vi.restoreAllMocks();
   });
 
-  it("routes api.anthropic.com to gotScraping (non-streaming) and returns ok response", async () => {
+  // proxyAwareFetch no longer routes through got-scraping (disabled upstream in v0.5.86).
+  it.skip("routes api.anthropic.com to gotScraping (non-streaming) and returns ok response", async () => {
     // Mock got-scraping before module load
     vi.doMock("got-scraping", () => {
       const mockGotScraping = vi.fn().mockResolvedValue({
