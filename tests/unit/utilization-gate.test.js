@@ -27,10 +27,20 @@ describe("utilization gate", () => {
     })).toBe(false);
   });
 
-  it("flags a known credit cap at 95% spent", () => {
+  it("flags a credit-only account once 25% of a known cap is spent", () => {
     expect(isAccountAtUtilizationCap({
-      "On-demand": { used: 95, total: 100, unlimited: false },
+      "On-demand": { used: 25, total: 100, unlimited: false },
     })).toBe(true);
+    expect(isAccountAtUtilizationCap({
+      "Monthly included": { used: 24, total: 100, unlimited: false },
+    })).toBe(false);
+  });
+
+  it("does not let a credit line skip a subscription that is still under 95%", () => {
+    expect(isAccountAtUtilizationCap({
+      "Weekly SuperGrok": { used: 10, total: 100, unlimited: false },
+      "On-demand": { used: 40, total: 100, unlimited: false },
+    })).toBe(false);
   });
 
   it("skips a combo model only when every account is at the cap", () => {

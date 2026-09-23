@@ -310,9 +310,9 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
         log.warn("COMBO", `Utilization check failed for ${modelStr}`, { error: error?.message || String(error) });
       }
       if (skip) {
-        log.info("COMBO", `Model ${modelStr} at >=95% utilization, trying next`);
+        log.info("COMBO", `Model ${modelStr} at its utilization cap, trying next`);
         if (!lastError) {
-          lastError = "utilization at or above 95%";
+          lastError = "utilization cap reached";
           lastStatus = 503;
         }
         continue;
