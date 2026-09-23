@@ -38,6 +38,12 @@ describe("terminal billing errors are not retried", () => {
     expect(r.newBackoffLevel).toBeUndefined();
   });
 
+  it("keeps a 402 terminal even when its body reads like a rate limit", () => {
+    const r = checkFallbackError(402, "quota exceeded: rate limit on credits");
+    expect(r.terminal).toBe(true);
+    expect(r.newBackoffLevel).toBeUndefined();
+  });
+
   it("does NOT mark a real rate limit as terminal", () => {
     const r = checkFallbackError(429, GLM_RATE_LIMIT, 0);
     expect(r.terminal).toBeFalsy();

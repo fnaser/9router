@@ -501,10 +501,17 @@ two steps (`open-sse/utils/error.js`, `open-sse/handlers/chatCore.js`):
    values are rejected so we never advertise an instant retry.
 2. **Synthesis** — most providers send no cooldown at all. When step 1 finds
    nothing, `chatCore` falls back to the cooldown `checkFallbackError()` already
-   computes from `ERROR_RULES`.
+   computes from `ERROR_RULES`. The synthesized value only sets the response
+   header. It is not passed on as `resetsAtMs`, so the account lock keeps its
+   exponential 429 backoff.
 
-A terminal billing error never carries `Retry-After`, even if the upstream
-response included one. Combo fallback still tries the next model.
+The direct error for a terminal billing failure carries no `Retry-After`, even
+if the upstream response included one. The account is still locked for the
+rule's cooldown. When every account for the model is locked, the 503 from
+`unavailableResponse()` reports when the earliest lock ends, because that is
+when 9router will try that account again. Combo fallback still tries the next
+model, and a combo that runs out of models forwards the earliest
+`Retry-After` it saw.
 
 ### Terminal vs transient errors
 
@@ -523,7 +530,8 @@ header and no body cooldown field:
 | `{"error":{"code":"1113","message":"余额不足或无可用资源包,请充值。"}}` | account out of credit | terminal, no retry advertised, combo continues |
 
 Terminal matching is text-based and runs before the rate-limit rules, so a
-body mentioning both classifies as terminal. Pinned by
+body mentioning both classifies as terminal. HTTP 402 is terminal whatever its
+body says. Pinned by
 `tests/unit/glm-error-classification.test.js`.
 
 ## 2) Token Expiry

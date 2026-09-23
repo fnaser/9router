@@ -45,6 +45,45 @@ describe("utilization gate", () => {
     })).toBe(false);
   });
 
+  it("counts a Claude per-model weekly row only for that model", () => {
+    const quotas = {
+      "session (5h)": { used: 20, total: 100 },
+      "weekly (7d)": { used: 30, total: 100 },
+      "weekly opus (7d)": { used: 97, total: 100 },
+    };
+    expect(isAccountAtUtilizationCap(quotas, "claude-opus-4-6")).toBe(true);
+    expect(isAccountAtUtilizationCap(quotas, "claude-sonnet-4-6")).toBe(false);
+  });
+
+  it("counts Codex Spark only for the Spark model and never counts review", () => {
+    const quotas = {
+      spark_session: { used: 99, total: 100 },
+      review_weekly: { used: 100, total: 100 },
+    };
+    expect(isAccountAtUtilizationCap(quotas, "gpt-5.5-codex")).toBe(false);
+    expect(isAccountAtUtilizationCap(quotas, "gpt-5.3-codex-spark")).toBe(true);
+  });
+
+  it("ignores a window whose reset time has passed", () => {
+    const now = Date.parse("2026-09-23T10:00:00Z");
+    expect(isAccountAtUtilizationCap({
+      "session (5h)": { used: 99, total: 100, resetAt: "2026-09-23T09:00:00.000Z" },
+    }, "claude-opus-4-6", now)).toBe(false);
+    expect(isAccountAtUtilizationCap({
+      "session (5h)": { used: 99, total: 100, resetAt: "2026-09-23T11:00:00.000Z" },
+    }, "claude-opus-4-6", now)).toBe(true);
+  });
+
+  it("passes the combo model id through to the scoped rows", async () => {
+    const deps = {
+      parseModel: (m) => ({ provider: "claude", model: m.split("/")[1] }),
+      getConnections: async () => [{ id: "a" }],
+      getUsage: async () => ({ quotas: { "weekly opus (7d)": { used: 99, total: 100 } } }),
+    };
+    expect(await evaluateComboModelSkip("cc/claude-opus-4-6", deps)).toBe(true);
+    expect(await evaluateComboModelSkip("cc/claude-sonnet-4-6", deps)).toBe(false);
+  });
+
   it("does not let a credit line skip a subscription that is still under 95%", () => {
     expect(isAccountAtUtilizationCap({
       "Weekly SuperGrok": { used: 10, total: 100, unlimited: false },

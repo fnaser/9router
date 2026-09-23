@@ -493,14 +493,17 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     // client gets a usable Retry-After instead of guessing with its own short
     // generic backoff. Terminal states (billing/credit) advertise no retry.
     // An upstream cooldown still wins for a non-terminal error.
-    let cooldownAtMs = resetsAtMs;
+    // The synthesized value only feeds the header: passing it as resetsAtMs
+    // would make markAccountUnavailable treat it as a provider reset and pin
+    // the account's 429 backoff at its first level.
+    let retryAfterAtMs = resetsAtMs;
     const decision = checkFallbackError(statusCode, message, 0);
     if (decision.terminal) {
-      cooldownAtMs = undefined;
-    } else if (!Number.isFinite(cooldownAtMs) && Number.isFinite(decision.cooldownMs) && decision.cooldownMs > 0) {
-      cooldownAtMs = Date.now() + decision.cooldownMs;
+      retryAfterAtMs = null;
+    } else if (!Number.isFinite(retryAfterAtMs) && Number.isFinite(decision.cooldownMs) && decision.cooldownMs > 0) {
+      retryAfterAtMs = Date.now() + decision.cooldownMs;
     }
-    return createErrorResult(statusCode, errMsg, cooldownAtMs);
+    return createErrorResult(statusCode, errMsg, resetsAtMs, retryAfterAtMs);
   }
 
   const sharedCtx = { provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, pxpipe: pxpipeSummary, reqTag, log };

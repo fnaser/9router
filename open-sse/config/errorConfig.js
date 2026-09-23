@@ -57,6 +57,10 @@ const COOLDOWN = {
  *   - backoff: true = use exponential backoff (rate limit)
  */
 export const ERROR_RULES = [
+  // 402 is a billing state whatever its body says ("quota exceeded" must not
+  // turn it into a retryable rate limit), so it outranks the text rules.
+  { status: 402, cooldownMs: COOLDOWN.long, terminal: true },
+
   // --- Text-based rules (checked first, order = priority) ---
   { text: "no credentials",           cooldownMs: COOLDOWN.long },
   { text: "request not allowed",      cooldownMs: COOLDOWN.short },
@@ -82,7 +86,6 @@ export const ERROR_RULES = [
 
   // --- Status-based rules (fallback when text doesn't match) ---
   { status: 401, cooldownMs: COOLDOWN.long },
-  { status: 402, cooldownMs: COOLDOWN.long, terminal: true },
   { status: 403, cooldownMs: COOLDOWN.long },
   { status: 404, cooldownMs: COOLDOWN.long },
   { status: 429, backoff: true },

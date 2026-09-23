@@ -22,6 +22,7 @@ const oauthCooldown = new Map();
 // Dedup + short TTL cache per access token. Many tabs / many accounts / auto-refresh
 // all funnel through here; without this each call hits Anthropic and triggers 429.
 const USAGE_CACHE_TTL_MS = 300000;
+const SOFT_FAILURE_TTL_MS = 60000;
 const usageCache = new Map(); // token -> { promise } | { result, expiresAt }
 
 export async function getClaudeUsage(accessToken, proxyOptions = null, options = {}) {
@@ -46,7 +47,13 @@ export async function getClaudeUsage(accessToken, proxyOptions = null, options =
       });
       return result;
     }
-    // Soft failure (429/error): prefer the last good read over a transient error
+    // Soft failure (429/error): prefer the last good read over a transient error,
+    // but only for a short while. Leaving the resolved promise in the cache would
+    // freeze this token's usage until the token changes.
+    if (accessToken && usageCache.get(accessToken)?.promise === promise) {
+      if (stale) usageCache.set(accessToken, { result: stale, expiresAt: Date.now() + SOFT_FAILURE_TTL_MS });
+      else usageCache.delete(accessToken);
+    }
     if (stale) return stale;
     return result;
   })();
