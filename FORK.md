@@ -1,6 +1,6 @@
 # fnaser/9router
 
-A fork of [decolua/9router](https://github.com/decolua/9router) for running Claude, Codex and Grok Build subscriptions behind one local endpoint.
+A fork of [decolua/9router](https://github.com/decolua/9router) for running Claude, Codex, Cursor and Grok/xAI subscriptions behind one local endpoint.
 
 ## What differs from upstream
 
@@ -27,18 +27,27 @@ npm start
 Then, at http://127.0.0.1:20127/dashboard:
 
 1. Log in with `123456` and change the password right away. Until you do, any program on the machine can log in.
-2. **Providers:** connect Claude Code, Codex and Grok Build. Logins do not travel with the repo. They live in `~/.9router` on each machine, so connect them again rather than copying that directory around.
+2. **Providers:** connect Claude Code, Codex, Cursor (import from the IDE), and Grok/xAI. Logins do not travel with the repo. They live in `~/.9router` on each machine, so connect them again rather than copying that directory around.
 3. **Endpoint:** create an API key. Chat requests need one, even from localhost.
-4. **Combos:** create a combo, for example `sub`, with Claude first, then Codex, then Grok. Pick model ids from `curl http://127.0.0.1:20127/v1/models`.
+4. **Combos:** create a combo, for example `subs`, with Claude first, then Codex, then Cursor, then Grok. Pick model ids from `curl http://127.0.0.1:20127/v1/models`.
 
 Leave tunnels, Tailscale and the MITM proxy off in settings. They expose the dashboard or install a local certificate authority.
 
+### Personal vs company accounts (convention)
+
+Until a content classifier exists, mark each connection yourself so a future policy hook can prefer company spend for sensitive prompts:
+
+- Set `providerSpecificData.tier` to `"personal"` or `"company"` on the connection (via edit / DB), **or**
+- Prefix the connection display name with `[personal]` / `[company]`.
+
+Untagged connections are treated as personal. `xai` slots in `subs` follow the same rule.
+
 ## Use it
 
-Claude Code in a terminal:
+Claude Code in a terminal (or a `claude9` wrapper that sources `~/.9router/claude-env.sh`):
 
 ```bash
-ANTHROPIC_BASE_URL=http://127.0.0.1:20127 ANTHROPIC_AUTH_TOKEN=YOUR_KEY claude --model sub
+ANTHROPIC_BASE_URL=http://127.0.0.1:20127 ANTHROPIC_AUTH_TOKEN=YOUR_KEY claude --model subs
 ```
 
 Any OpenAI-compatible client: base URL `http://127.0.0.1:20127/v1`, your key, and the combo name as the model.
@@ -86,9 +95,18 @@ Stop it with `launchctl bootout gui/$(id -u)/com.fnaser.9router`. After pulling 
 git remote add upstream https://github.com/decolua/9router.git   # once
 git fetch upstream
 git merge upstream/master
-cd tests && npm install && npx vitest run unit/utilization-gate.test.js unit/cursor-usage.test.js unit/combo-retry-after.test.js unit/retry-after-backoff.test.js unit/glm-error-classification.test.js unit/upstream-retry-after.test.js unit/account-fallback-4xx.test.js unit/claude-passthrough-safeguards.test.js
+cd tests && npm install && npx vitest run \
+  unit/utilization-gate.test.js \
+  unit/utilization-skip-last-good.test.js \
+  unit/cursor-usage.test.js \
+  unit/combo-retry-after.test.js \
+  unit/retry-after-backoff.test.js \
+  unit/glm-error-classification.test.js \
+  unit/upstream-retry-after.test.js \
+  unit/account-fallback-4xx.test.js \
+  unit/claude-passthrough-safeguards.test.js
 ```
 
 Conflicts usually land in `open-sse/services/combo.js`, `src/sse/handlers/chat.js`, `open-sse/handlers/chatCore.js` and `open-sse/utils/error.js`. If upstream re-adds a background refresh start in `custom-server.js` or `initializeApp.js`, drop it: `src/instrumentation.js` is the only place that should start it.
 
-The full suite has about 74 known failures. Most are in providers this fork doesn't use (Kiro, Cursor, OpenCode, Kimchi, Cline, Windsurf, Antigravity). The rest are features upstream has turned off (search-aware combo reordering), tests that rely on a missing `cloud/` directory or a live endpoint, and translator strictness upstream never shipped, such as flattening text arrays to plain strings, which OpenAI-compatible upstreams accept either way. `db-concurrent` fails because usage logging drops a row identical to one in the same millisecond, and the test sends 100 identical rows at once. Compare against a run on the previous commit rather than expecting all green. If `golden-url-header` fails after a merge, check that the URL or header change is intended, then refresh the snapshot with `npx vitest run translator/golden-url-header.test.js -u`.
+The full suite has about 74 known failures. Most are in providers this fork does not run day-to-day (Kiro, OpenCode, Kimchi, Cline, Windsurf, Antigravity, Zed). Cursor is in the usage path here; `oauth-cursor-auto-import` remains a known-fail *test*, not an unused provider. The rest are features upstream has turned off (search-aware combo reordering), tests that rely on a missing `cloud/` directory or a live endpoint, and translator strictness upstream never shipped, such as flattening text arrays to plain strings, which OpenAI-compatible upstreams accept either way. `db-concurrent` fails because usage logging drops a row identical to one in the same millisecond, and the test sends 100 identical rows at once. Compare against a run on the previous commit rather than expecting all green. If `golden-url-header` fails after a merge, check that the URL or header change is intended, then refresh the snapshot with `npx vitest run translator/golden-url-header.test.js -u`.

@@ -2,6 +2,12 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## fnaser fork
+
+This checkout is [fnaser/9router](https://github.com/fnaser/9router). Read **[FORK.md](./FORK.md)** for what differs from upstream, local setup, and the post-merge vitest subset.
+
+Day-to-day path: combo `subs` (Claude → Codex → Cursor → xAI), `npm start` / launchd on **127.0.0.1:20127** (not the upstream README’s 20128 / `0.0.0.0`). Fork behaviour to preserve when editing routing: utilization gate + last-good usage cache, Claude `safeguards` strip, connect-timeout without account lock, Cursor usage probe.
+
 ## What this is
 
 9Router (`9router-app`) — a local AI routing gateway + Next.js dashboard. It exposes one OpenAI-compatible endpoint (`/v1/*`) and routes traffic across 40+ upstream providers with format translation, model-combo fallback, multi-account fallback, OAuth/API-key credential management, token refresh, quota/usage tracking, and optional cloud sync.
@@ -21,8 +27,9 @@ npm install
 PORT=20128 NEXT_PUBLIC_BASE_URL=http://localhost:20128 npm run dev   # dev (webpack, port 20127 by default via next dev)
 npm run build && PORT=20128 HOSTNAME=0.0.0.0 npm run start           # production
 ```
+- This fork’s usual production start is `npm start` → `custom-server.js` on **127.0.0.1:20127** (see FORK.md / launchd).
 - Bun variants: `npm run dev:bun` / `build:bun` / `start:bun`.
-- Default runtime port is **20128** (dashboard at `/dashboard`, API at `/v1`).
+- Upstream default port in scripts above is **20128**; fork launchd uses **20127**.
 - Lint: `npx eslint .` (config `eslint.config.mjs`, extends `eslint-config-next`).
 
 CLI package (`cli/`):
@@ -47,12 +54,14 @@ npx vitest run unit/capabilities.test.js   # single file (path relative to tests
 > - `real/*.real.test.js` make live provider calls — need credentials, skip otherwise.
 - `*.real.test.js` under `tests/translator/real/` make live provider calls — skip unless credentials are set.
 - Regression baselines: `tests/__baseline__/verify-*.mjs` compare against committed snapshots (providers, aliases, OAuth URLs). Run these after touching provider registry / alias logic.
+- Fork post-merge subset: see the vitest list in FORK.md (“Update from upstream”).
 
 ## Architecture
 
 Two authoritative docs already exist — read them before working in these areas rather than re-deriving:
 - `docs/ARCHITECTURE.md` — full system: request lifecycle, combo/account fallback, OAuth + token refresh, cloud sync, data model.
 - `open-sse/AGENTS.md` — the routing/translation engine's own conventions and "how to add a provider/executor/translator". **Read this before editing anything under `open-sse/`.**
+- `FORK.md` — fork deltas (utilization gate, last-good, safeguards, Cursor probe).
 
 ### Request flow (the thing to understand first)
 `src/app/api/v1/*` route (Next rewrite maps `/v1/*` → `/api/v1/*` in `next.config.mjs`)
@@ -73,10 +82,10 @@ Two authoritative docs already exist — read them before working in these areas
 - One file per provider. `providers/registry/index.js` is an **auto-generated** static import list — regenerate it with `scripts/migrate-registry.mjs` / `injectDisplayToRegistry.mjs`, don't hand-edit.
 - Add a provider: copy `providers/REGISTRY_TEMPLATE.js`, add models to `config/providerModels.js`. Only add an executor for non-OpenAI-compatible upstreams.
 
-### Persistence — IMPORTANT (ARCHITECTURE.md is stale here)
-State is **no longer `db.json`**. It's a SQLite layer under `src/lib/db/` with an adapter fallback chain (`driver.js`): `bun:sqlite` → `better-sqlite3` (optional native dep) → `node:sqlite` (Node ≥22.5) → `sql.js` (pure-JS fallback, always works). `better-sqlite3` is deliberately in `optionalDependencies` so install never fails without build tools.
+### Persistence
+State is a SQLite layer under `src/lib/db/` with an adapter fallback chain (`driver.js`): `bun:sqlite` → `better-sqlite3` (optional native dep) → `node:sqlite` (Node ≥22.5) → `sql.js` (pure-JS fallback, always works). `better-sqlite3` is deliberately in `optionalDependencies` so install never fails without build tools.
 - `src/lib/localDb.js` is a **backward-compat shim** re-exporting `src/lib/db/index.js`. New code should import from `@/lib/db/index.js`; per-entity logic lives in `src/lib/db/repos/*`. Schema/migrations in `src/lib/db/migrations/`.
-- DB file location resolves via `src/lib/db/paths.js` (`DATA_DIR`, else `~/.9router/`).
+- DB file location resolves via `src/lib/db/paths.js` (`DATA_DIR`, else `~/.9router/db/data.sqlite`).
 - Usage/logs (`src/lib/usageDb.js`, `usage.json` + `log.txt`) still live under `~/.9router` and do **not** follow `DATA_DIR`.
 
 ### RTK token saver (`open-sse/rtk/`)

@@ -1,6 +1,7 @@
 # 9Router Architecture
 
-_Last updated: 2026-02-06_
+_Last updated: 2026-09-24_
+
 
 ## Executive Summary
 
@@ -56,7 +57,7 @@ flowchart LR
         API[V1 Compatibility API\n/v1/*]
         DASH[Dashboard + Management API\n/api/*]
         CORE[SSE + Translation Core\nopen-sse + src/sse]
-        DB[(db.json)]
+        DB[(SQLite data.sqlite)]
         UDB[(usage.json + log.txt)]
     end
 
@@ -137,8 +138,9 @@ Main flow modules:
 
 Primary state DB:
 
-- `src/lib/localDb.js`
-- file: `${DATA_DIR}/db.json` (or `~/.9router/db.json` when `DATA_DIR` is unset)
+- `src/lib/db/` (repos under `src/lib/db/repos/*`; `src/lib/localDb.js` is a shim)
+- file: `${DATA_DIR}/db/data.sqlite` (or `~/.9router/db/data.sqlite` when `DATA_DIR` is unset)
+- drivers (fallback chain): `bun:sqlite` → `better-sqlite3` → `node:sqlite` → `sql.js`
 - entities: providerConnections, providerNodes, modelAliases, combos, apiKeys, settings, pricing
 
 Usage DB:
@@ -377,7 +379,7 @@ erDiagram
 
 Physical storage files:
 
-- main state: `${DATA_DIR}/db.json` (or `~/.9router/db.json`)
+- main state: `${DATA_DIR}/db/data.sqlite` (or `~/.9router/db/data.sqlite`)
 - usage stats: `~/.9router/usage.json`
 - request log lines: `~/.9router/log.txt`
 - optional translator/request debug sessions: `<repo>/logs/...`
@@ -394,7 +396,7 @@ flowchart LR
     subgraph ContainerOrProcess[9Router Runtime]
         Next[Next.js Server\nPORT=20128]
         Core[SSE Core + Executors]
-        MainDB[(db.json)]
+        MainDB[(SQLite data.sqlite)]
         UsageDB[(usage.json/log.txt)]
     end
 
@@ -534,6 +536,32 @@ body mentioning both classifies as terminal. HTTP 402 is terminal whatever its
 body says. Pinned by
 `tests/unit/glm-error-classification.test.js`.
 
+### Utilization skip (combo pre-dispatch)
+
+Before a combo tries a model, `src/sse/services/utilizationSkip.js` asks
+`open-sse/services/utilizationGate.js` whether every active account for that
+provider is already at cap. Subscription windows (session / weekly) skip at
+≥95% used; credit-only rows skip at ≥25%. Claude Team `extra_usage` is exposed
+as an `On-demand` credit row: weekly full + On-demand under 25% keeps the
+account. Cursor `Billing period` is an “other” meter (95% skip). A missing or
+failed usage payload keeps the model (fail-open), except the skip layer reuses
+a last-good quota snapshot for up to 15 minutes after a timeout/soft failure.
+
+### Claude `safeguards` and connect-timeout locks
+
+`open-sse/translator/formats/claude.js` deletes a client `safeguards` field on
+passthrough so Anthropic does not 400 with “Extra inputs are not permitted”
+and abort the combo. `ERROR_RULES` matches `fetch connect timeout` with
+`cooldownMs: 0`; `src/sse/services/auth.js` skips writing an account lock when
+cooldown is zero so the next account is tried immediately.
+
+### Cursor usage and session probe
+
+`open-sse/services/usage/cursor.js` POSTs
+`GetCurrentPeriodUsage` for dashboard meters and live import/Test Connection
+probes. Import warns when another connection already shares the same
+`machineId` (one live Cursor session per Mac).
+
 ## 2) Token Expiry
 
 - pre-check and refresh with retry for refreshable providers
@@ -552,8 +580,8 @@ body says. Pinned by
 
 ## 5) Data Integrity
 
-- DB shape migration/repair for missing keys
-- corrupt JSON reset safeguards for localDb and usageDb
+- SQLite schema/migrations under `src/lib/db/migrations/`
+- corrupt JSON reset safeguards for usageDb (legacy JSON usage files)
 
 ## Observability and Operational Signals
 
