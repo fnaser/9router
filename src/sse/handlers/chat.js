@@ -28,6 +28,71 @@ import { shouldSkipComboModel } from "../services/utilizationSkip.js";
 import { tripProvider, clearProviderTrip } from "../services/providerCircuit.js";
 
 /**
+ * Route a named combo (or fusion) through the shared combo handlers.
+ * Used from handleChat and from handleSingleModelChat when the model string
+ * resolves to a combo rather than provider/model.
+ */
+function routeComboChat({
+  body,
+  modelStr,
+  comboModels,
+  settings,
+  clientRawRequest,
+  request,
+  apiKey,
+  requiredCapabilities,
+}) {
+  const comboStrategies = settings.comboStrategies || {};
+  const comboSpecificStrategy = comboStrategies[modelStr]?.fallbackStrategy;
+  const comboStrategy = comboSpecificStrategy || settings.comboStrategy || "fallback";
+  const caps = requiredCapabilities instanceof Set
+    ? requiredCapabilities
+    : detectRequiredCapabilities(body);
+  const augmentedModels = augmentModelsWithCapacityAdapter(comboModels, caps, settings);
+  const adapterAdded = augmentedModels.filter((m) => !comboModels.includes(m));
+
+  const handleOne = (b, m, isPanel) => {
+    let cleanRawReq = clientRawRequest;
+    if (isPanel && clientRawRequest) {
+      const { tools, tool_choice, ...cleanBody } = clientRawRequest.body || {};
+      cleanRawReq = { ...clientRawRequest, body: cleanBody };
+    }
+    return handleSingleModelChat(b, m, cleanRawReq || clientRawRequest, request, apiKey, settings);
+  };
+
+  if (comboStrategy === "fusion") {
+    log.info("CHAT", `Combo "${modelStr}" with ${comboModels.length} models (strategy: fusion)`);
+    return handleFusionChat({
+      body,
+      models: comboModels,
+      handleSingleModel: handleOne,
+      log,
+      comboName: modelStr,
+      judgeModel: comboStrategies[modelStr]?.judgeModel,
+      tuning: comboStrategies[modelStr]?.fusionTuning,
+      shouldSkipModel: shouldSkipComboModel,
+    });
+  }
+
+  const comboStickyLimit = settings.comboStickyRoundRobinLimit;
+  log.info("CHAT", `Combo "${modelStr}" with ${augmentedModels.length} models (strategy: ${comboStrategy}, sticky: ${comboStickyLimit})`);
+  return handleComboChat({
+    body,
+    models: augmentedModels,
+    handleSingleModel: withCapacityAdapterStripping(
+      (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, settings),
+      adapterAdded
+    ),
+    log,
+    comboName: modelStr,
+    comboStrategy,
+    comboStickyLimit,
+    shouldSkipModel: shouldSkipComboModel,
+    requiredCapabilities: caps,
+  });
+}
+
+/**
  * Handle chat completion request
  * Supports: OpenAI, Claude, Gemini, OpenAI Responses API formats
  * Format detection and translation handled by translator
@@ -97,49 +162,14 @@ export async function handleChat(request, clientRawRequest = null) {
   // Check if model is a combo (has multiple models with fallback)
   const comboModels = await getComboModels(modelStr);
   if (comboModels) {
-    // Check for combo-specific strategy first, fallback to global
-    const comboStrategies = settings.comboStrategies || {};
-    const comboSpecificStrategy = comboStrategies[modelStr]?.fallbackStrategy;
-    const comboStrategy = comboSpecificStrategy || settings.comboStrategy || "fallback";
-    const augmentedModels = augmentModelsWithCapacityAdapter(comboModels, requiredCapabilities, settings);
-    const adapterAdded = augmentedModels.filter((m) => !comboModels.includes(m));
-    const handleOne = (b, m, isPanel) => {
-      let cleanRawReq = clientRawRequest;
-      if (isPanel && clientRawRequest) {
-        const { tools, tool_choice, ...cleanBody } = clientRawRequest.body || {};
-        cleanRawReq = { ...clientRawRequest, body: cleanBody };
-      }
-      return handleSingleModelChat(b, m, cleanRawReq || clientRawRequest, request, apiKey, settings);
-    };
-
-    if (comboStrategy === "fusion") {
-      log.info("CHAT", `Combo "${modelStr}" with ${comboModels.length} models (strategy: fusion)`);
-      return handleFusionChat({
-        body,
-        models: comboModels,
-        handleSingleModel: handleOne,
-        log,
-        comboName: modelStr,
-        judgeModel: comboStrategies[modelStr]?.judgeModel,
-        tuning: comboStrategies[modelStr]?.fusionTuning,
-        shouldSkipModel: shouldSkipComboModel,
-      });
-    }
-
-    const comboStickyLimit = settings.comboStickyRoundRobinLimit;
-    log.info("CHAT", `Combo "${modelStr}" with ${augmentedModels.length} models (strategy: ${comboStrategy}, sticky: ${comboStickyLimit})`);
-    return handleComboChat({
+    return routeComboChat({
       body,
-      models: augmentedModels,
-      handleSingleModel: withCapacityAdapterStripping(
-        (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, settings),
-        adapterAdded
-      ),
-      log,
-      comboName: modelStr,
-      comboStrategy,
-      comboStickyLimit,
-      shouldSkipModel: shouldSkipComboModel,
+      modelStr,
+      comboModels,
+      settings,
+      clientRawRequest,
+      request,
+      apiKey,
       requiredCapabilities,
     });
   }
@@ -179,50 +209,15 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
     const comboModels = await getComboModels(modelStr);
     if (comboModels) {
       const chatSettings = settings || await getSettings();
-      // Check for combo-specific strategy first, fallback to global
-      const comboStrategies = chatSettings.comboStrategies || {};
-      const comboSpecificStrategy = comboStrategies[modelStr]?.fallbackStrategy;
-      const comboStrategy = comboSpecificStrategy || chatSettings.comboStrategy || "fallback";
-      const requiredCapabilities = detectRequiredCapabilities(body);
-      const augmentedModels = augmentModelsWithCapacityAdapter(comboModels, requiredCapabilities, chatSettings);
-      const adapterAdded = augmentedModels.filter((m) => !comboModels.includes(m));
-
-      if (comboStrategy === "fusion") {
-        log.info("CHAT", `Combo "${modelStr}" with ${comboModels.length} models (strategy: fusion)`);
-        return handleFusionChat({
-          body,
-          models: comboModels,
-          handleSingleModel: (b, m, isPanel) => {
-            let cleanRawReq = clientRawRequest;
-            if (isPanel && clientRawRequest) {
-              const { tools, tool_choice, ...cleanBody } = clientRawRequest.body || {};
-              cleanRawReq = { ...clientRawRequest, body: cleanBody };
-            }
-            return handleSingleModelChat(b, m, cleanRawReq, request, apiKey, chatSettings);
-          },
-          log,
-          comboName: modelStr,
-          judgeModel: comboStrategies[modelStr]?.judgeModel,
-          tuning: comboStrategies[modelStr]?.fusionTuning,
-          shouldSkipModel: shouldSkipComboModel,
-        });
-      }
-
-      const comboStickyLimit = chatSettings.comboStickyRoundRobinLimit;
-      log.info("CHAT", `Combo "${modelStr}" with ${augmentedModels.length} models (strategy: ${comboStrategy}, sticky: ${comboStickyLimit})`);
-      return handleComboChat({
+      return routeComboChat({
         body,
-        models: augmentedModels,
-        handleSingleModel: withCapacityAdapterStripping(
-          (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, chatSettings),
-          adapterAdded
-        ),
-        log,
-        comboName: modelStr,
-        comboStrategy,
-        comboStickyLimit,
-        shouldSkipModel: shouldSkipComboModel,
-        requiredCapabilities,
+        modelStr,
+        comboModels,
+        settings: chatSettings,
+        clientRawRequest,
+        request,
+        apiKey,
+        requiredCapabilities: detectRequiredCapabilities(body),
       });
     }
     log.warn("CHAT", "Invalid model format", { model: modelStr });

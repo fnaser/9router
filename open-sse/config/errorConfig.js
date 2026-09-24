@@ -83,10 +83,11 @@ export const ERROR_RULES = [
   // (and must not lock the account — cooldownMs 0).
   { text: "extra inputs are not permitted", cooldownMs: 0 },
 
-  // Synthetic connect-timeout 502s from BaseExecutor. A long model lock (30s)
-  // cascades under parallel sessions; zero lock re-selects the hung account on
-  // every concurrent turn. Soft cool + in-process circuit (providerCircuit)
-  // keep siblings from each burning a full headers wait.
+  // Synthetic connect-timeout 502s from BaseExecutor. One attempt only (no 502
+  // retry ladder). Dual defense for parallel turns:
+  //   1) cooldownMs 20s → brief modelLock_* so account selection skips the peer
+  //   2) providerCircuit (~20s) → combo shouldSkipComboModel skips the provider
+  // A long lock (30s+) used to cascade under parallel Claude Code sessions.
   { text: "fetch connect timeout", cooldownMs: 20 * 1000 },
 
   { text: "rate limit",               backoff: true },
