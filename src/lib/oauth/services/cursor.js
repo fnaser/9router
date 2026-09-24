@@ -1,4 +1,5 @@
 import { CURSOR_CONFIG } from "../constants/oauth.js";
+import { probeCursorAccessToken } from "../../../../open-sse/services/usage/cursor.js";
 
 /**
  * Cursor IDE OAuth Service
@@ -86,9 +87,9 @@ export class CursorService {
   }
 
   /**
-   * Validate and import token from Cursor IDE
-   * Note: We skip API validation because Cursor API uses complex protobuf format.
-   * Token will be validated when actually used for requests.
+   * Validate and import token from Cursor IDE.
+   * Probes DashboardService so a revoked session fails import instead of
+   * showing dashboard green and 401ing mid-combo.
    * @param {string} accessToken - Access token from state.vscdb
    * @param {string} machineId - Machine ID from state.vscdb
    */
@@ -113,13 +114,15 @@ export class CursorService {
       throw new Error("Invalid machine ID format. Expected UUID format.");
     }
 
-    // Note: We don't validate against API because Cursor uses complex protobuf.
-    // Token will be validated when used for actual requests.
+    const probe = await probeCursorAccessToken(accessToken.trim());
+    if (!probe.ok) {
+      throw new Error(probe.error || "Cursor token rejected by Cursor API");
+    }
 
     return {
       accessToken,
       machineId,
-      expiresIn: 86400, // Cursor tokens typically last 24 hours
+      expiresIn: 86400, // Cursor session JWTs are long-lived; re-import when revoked
       authMethod: "imported",
     };
   }

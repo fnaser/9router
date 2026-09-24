@@ -84,7 +84,16 @@ const OAUTH_TEST_CONFIG = {
   },
   kimi: { checkExpiry: true, refreshable: true },
   "kimi-coding": { checkExpiry: true, refreshable: true },
-  cursor: { tokenExists: true },
+  // Live JSON probe — tokenExists previously returned green for revoked tokens.
+  cursor: {
+    url: "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage",
+    method: "POST",
+    authHeader: "Authorization",
+    authPrefix: "Bearer ",
+    body: "{}",
+    extraHeaders: { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" },
+    refreshable: false,
+  },
   kilocode: {
     url: `${KILOCODE_CONFIG.apiBaseUrl}/api/profile`,
     method: "GET",
@@ -331,8 +340,9 @@ async function testOAuthConnection(connection, effectiveProxy = null) {
   if (!config) return { valid: false, error: "Provider test not supported", refreshed: false };
   if (!connection.accessToken) return { valid: false, error: "No access token", refreshed: false };
 
-  // Cursor uses protobuf API - can only verify token exists, not test endpoint
-  if (config.tokenExists) {
+  // Cursor / CodeBuddy: tokenExists means "string present" only — prefer a live
+  // probe when the provider has a URL config (Cursor now does).
+  if (config.tokenExists && !config.url) {
     return { valid: true, error: null, refreshed: false, newTokens: null };
   }
 

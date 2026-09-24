@@ -43,15 +43,13 @@ function usedRatio(quota, now) {
   return used / total;
 }
 
-/**
+  /**
  * True when this account should be skipped for `model`.
- * A subscription window (session or weekly) skips at 95% used. Credit lines on
- * that same account do not. An account whose only quotas are credits skips
- * when any known cap is 25% spent. A prepaid row stored as used=0 has no
- * spend ratio, so it does not trip the credit cap.
- * @param {Record<string, { used?: number, total?: number, unlimited?: boolean, resetAt?: string|null }>|null|undefined} quotas
- * @param {string} [model] - upstream model id; model-scoped rows only count when it matches
- * @param {number} [now]
+ * A subscription window (session or weekly) skips at 95% used — unless the
+ * same account still has on-demand / credit headroom under the credit cap
+ * (Team extra usage). An account whose only quotas are credits skips when
+ * any known cap is 25% spent. Other named meters (e.g. Cursor billing
+ * period) skip at 95%.
  */
 export function isAccountAtUtilizationCap(quotas, model, now = Date.now()) {
   if (!quotas || typeof quotas !== "object") return false;
@@ -67,7 +65,13 @@ export function isAccountAtUtilizationCap(quotas, model, now = Date.now()) {
     else other.push(ratio);
   }
   if (subscription.length > 0) {
-    return subscription.some((ratio) => ratio >= UTILIZATION_SKIP_RATIO);
+    const subCapped = subscription.some((ratio) => ratio >= UTILIZATION_SKIP_RATIO);
+    if (!subCapped) return false;
+    // Session/weekly full — still allow if credit/extra rows remain under the credit cap.
+    if (credits.length > 0) {
+      return credits.some((ratio) => ratio >= CREDIT_SKIP_RATIO);
+    }
+    return true;
   }
   if (credits.length > 0) {
     return credits.some((ratio) => ratio >= CREDIT_SKIP_RATIO);
