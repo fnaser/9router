@@ -78,6 +78,16 @@ export const ERROR_RULES = [
   { text: "insufficient balance",     cooldownMs: COOLDOWN.long, terminal: true },
   { text: "请充值",                    cooldownMs: COOLDOWN.long, terminal: true },
 
+  // Request-shaped Anthropic 400s that say nothing about the credential.
+  // Bare 400s otherwise refuse combo fallthrough; these must try the next model
+  // (and must not lock the account — cooldownMs 0).
+  { text: "extra inputs are not permitted", cooldownMs: 0 },
+
+  // Synthetic connect-timeout 502s from BaseExecutor. A 30s model lock here
+  // cascades under parallel Claude Code sessions (sibling turns all see
+  // "all accounts locked"). Fall through immediately with no lock.
+  { text: "fetch connect timeout", cooldownMs: 0 },
+
   { text: "rate limit",               backoff: true },
   { text: "too many requests",        backoff: true },
   { text: "quota exceeded",           backoff: true },

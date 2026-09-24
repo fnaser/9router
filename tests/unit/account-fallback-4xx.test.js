@@ -29,6 +29,19 @@ describe("checkFallbackError — request-scoped vs account-scoped failures", () 
     expect(checkFallbackError(422, "quota exceeded").shouldFallback).toBe(true);
   });
 
+  it("falls through Extra inputs 400 without locking the account", () => {
+    const result = checkFallbackError(400, JSON.stringify({
+      type: "error",
+      error: { type: "invalid_request_error", message: "safeguards: Extra inputs are not permitted" },
+    }));
+    expect(result).toEqual({ shouldFallback: true, cooldownMs: 0, terminal: false });
+  });
+
+  it("falls through synthetic connect-timeout 502 without locking", () => {
+    const result = checkFallbackError(502, "[502]: fetch connect timeout");
+    expect(result).toEqual({ shouldFallback: true, cooldownMs: 0, terminal: false });
+  });
+
   it("keeps the transient cooldown for unmatched server errors", () => {
     const result = checkFallbackError(503, "upstream exploded");
 
