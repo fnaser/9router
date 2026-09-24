@@ -8,12 +8,14 @@ import Button from "@/shared/components/Button";
 import Badge from "@/shared/components/Badge";
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS } from "@/shared/constants/providers";
 import Select from "@/shared/components/Select";
+import { CONNECTION_TIERS, getConnectionTier } from "@/shared/utils/connectionTier";
 
 export default function EditConnectionModal({ isOpen, connection, proxyPools, onSave, onClose }) {
   const [formData, setFormData] = useState({
     name: "",
     priority: 1,
     apiKey: "",
+    tier: "personal",
   });
   const [azureData, setAzureData] = useState({
     azureEndpoint: "",
@@ -35,6 +37,7 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
         name: connection.name || "",
         priority: connection.priority || 1,
         apiKey: "",
+        tier: getConnectionTier(connection),
       });
       // Load Azure-specific data if present
       if (connection.provider === "azure" && connection.providerSpecificData) {
@@ -155,9 +158,11 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
         }
       }
       
-      // Add Azure-specific data if this is an Azure connection
+      // Merge providerSpecificData carefully so oauth fields (machineId, etc.) survive.
+      let nextPsd = { ...(connection.providerSpecificData || {}) };
       if (isAzure) {
-        updates.providerSpecificData = {
+        nextPsd = {
+          ...nextPsd,
           azureEndpoint: azureData.azureEndpoint,
           apiVersion: azureData.apiVersion,
           deployment: azureData.deployment,
@@ -165,12 +170,13 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
         };
       }
       if (isCloudflareAi) {
-        updates.providerSpecificData = { accountId: cloudflareData.accountId };
+        nextPsd = { ...nextPsd, accountId: cloudflareData.accountId };
       }
-      // Persist updated region for region-aware providers
       if (providerRegions && region) {
-        updates.providerSpecificData = buildRegionSpecificData();
+        nextPsd = { ...nextPsd, region };
       }
+      nextPsd.tier = formData.tier === "company" ? "company" : "personal";
+      updates.providerSpecificData = nextPsd;
       
       await onSave(updates);
     } finally {
@@ -188,6 +194,13 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
           value={formData.name}
           onChange={(e) => setFormData({ ...formData, name: e.target.value })}
           placeholder={isOAuth ? "Account name" : "Production Key"}
+        />
+        <Select
+          label="Account tier"
+          value={formData.tier}
+          onChange={(e) => setFormData({ ...formData, tier: e.target.value })}
+          options={CONNECTION_TIERS}
+          hint="Personal = consumer subs. Company = org/team spend. Used when routing sensitive prompts away from personal accounts."
         />
         {isOAuth && connection.email && (
           <div className="bg-sidebar/50 p-3 rounded-lg">

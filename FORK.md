@@ -33,14 +33,11 @@ Then, at http://127.0.0.1:20127/dashboard:
 
 Leave tunnels, Tailscale and the MITM proxy off in settings. They expose the dashboard or install a local certificate authority.
 
-### Personal vs company accounts (convention)
+### Personal vs company accounts
 
-Until a content classifier exists, mark each connection yourself so a future policy hook can prefer company spend for sensitive prompts:
+Mark each connection in **Providers → Edit → Account tier** (`personal` or `company`). Stored as `providerSpecificData.tier`. Name prefixes `[personal]` / `[company]` still work as a fallback. Untagged → personal.
 
-- Set `providerSpecificData.tier` to `"personal"` or `"company"` on the connection (via edit / DB), **or**
-- Prefix the connection display name with `[personal]` / `[company]`.
-
-Untagged connections are treated as personal. `xai` slots in `subs` follow the same rule.
+A future content classifier will prefer `company` accounts for sensitive prompts.
 
 ## Use it
 

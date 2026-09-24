@@ -5,6 +5,7 @@ import { getStatusVariant as getConnectionStatusVariant } from "@/shared/utils/c
 import PropTypes from "prop-types";
 import { Badge, Toggle, Tooltip } from "@/shared/components";
 import CooldownTimer from "./CooldownTimer";
+import { getConnectionTier } from "@/shared/utils/connectionTier";
 
 export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst, isLast, onMoveUp, onMoveDown, onToggleActive, onUpdateProxy, onEdit, onDelete, oneByOneStatus = null, autoPing = null }) {
   const [showProxyDropdown, setShowProxyDropdown] = useState(false);
@@ -169,6 +170,12 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
             </Badge>
             <Badge variant="default" size="sm">
               {authLabel}
+            </Badge>
+            <Badge
+              variant={getConnectionTier(connection) === "company" ? "primary" : "default"}
+              size="sm"
+            >
+              {getConnectionTier(connection)}
             </Badge>
             {hasAnyProxy && (
               <Badge variant={proxyBadgeVariant} size="sm">
