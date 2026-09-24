@@ -276,15 +276,18 @@ export function getComboModelsFromData(modelStr, combosData) {
  * @param {string} [options.comboStrategy] - Strategy: "fallback" or "round-robin"
  * @param {number|string} [options.comboStickyLimit=1] - Requests per combo model before switching
  * @param {Function} [options.shouldSkipModel] - (modelStr) => Promise<boolean>. True skips before the upstream call.
+ * @param {Set<string>|null} [options.requiredCapabilities] - Precomputed capability set from the outer handler (avoids a second body scan).
  * @returns {Promise<Response>}
  */
-export async function handleComboChat({ body, models, handleSingleModel, log, comboName, comboStrategy, comboStickyLimit = 1, autoSwitch = true, shouldSkipModel = null }) {
+export async function handleComboChat({ body, models, handleSingleModel, log, comboName, comboStrategy, comboStickyLimit = 1, autoSwitch = true, shouldSkipModel = null, requiredCapabilities = null }) {
   // Apply rotation strategy if enabled
   let rotatedModels = getRotatedModels(models, comboName, comboStrategy, comboStickyLimit);
 
   // Auto-switch: float models that satisfy the request's required capabilities to the front.
   if (autoSwitch) {
-    const required = detectRequiredCapabilities(body);
+    const required = requiredCapabilities instanceof Set
+      ? requiredCapabilities
+      : detectRequiredCapabilities(body);
     if (required.size > 0) {
       const reordered = reorderByCapabilities(rotatedModels, required);
       if (reordered[0] !== rotatedModels[0]) {

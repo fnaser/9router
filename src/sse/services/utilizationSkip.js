@@ -1,6 +1,9 @@
 import { parseModel } from "open-sse/services/model.js";
 import { getUsageForProvider } from "open-sse/services/usage.js";
-import { evaluateComboModelSkip } from "open-sse/services/utilizationGate.js";
+import {
+  evaluateComboModelSkip,
+  shouldSkipModelForUtilization,
+} from "open-sse/services/utilizationGate.js";
 import { getProviderConnections } from "@/lib/localDb";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { checkAndRefreshToken } from "./tokenRefresh.js";
@@ -72,6 +75,44 @@ function lastGoodOrUnavailable(id) {
   return UNAVAILABLE;
 }
 
+/** Sync peek: short cache first, then last-good. No network. */
+function peekUsage(connection) {
+  const id = connection?.id;
+  if (!id) return { usage: null, needsRefresh: true };
+
+  const hit = cache.get(id);
+  if (hit && Date.now() - hit.at < (hit.usage ? CACHE_MS : FAILURE_CACHE_MS)) {
+    if (hit.usage?.quotas) return { usage: hit.usage, needsRefresh: false };
+    const lg = lastGoodOrUnavailable(id);
+    return { usage: lg?.quotas ? lg : null, needsRefresh: true };
+  }
+
+  const lg = lastGood.get(id);
+  if (lg?.usage?.quotas && Date.now() - lg.at < LAST_GOOD_MAX_AGE_MS) {
+    return { usage: lg.usage, needsRefresh: true };
+  }
+  return { usage: null, needsRefresh: true };
+}
+
+/** Fire-and-forget usage refresh; coalesced via inflight. */
+function kickBackgroundRefresh(connection) {
+  const id = connection?.id;
+  if (!id || inflight.has(id)) return;
+  const job = fetchUsage(connection)
+    .then((usage) => {
+      remember(id, usage?.quotas ? usage : null);
+      return usage?.quotas ? usage : lastGoodOrUnavailable(id);
+    })
+    .catch(() => {
+      remember(id, null);
+      return lastGoodOrUnavailable(id);
+    })
+    .finally(() => {
+      inflight.delete(id);
+    });
+  inflight.set(id, job);
+}
+
 // A failed or slow read is remembered briefly so a hung usage endpoint does not
 // cost the timeout on every request. A late success still fills the cache.
 // On timeout/error, reuse the last good quotas (up to 15m) so the utilization
@@ -109,13 +150,41 @@ async function getUsage(connection) {
   return usage;
 }
 
-/** Combo hook: skip when every active account is at its cap (95% subscription, 25% credit-only). */
-export function shouldSkipComboModel(modelStr) {
-  return evaluateComboModelSkip(modelStr, {
-    parseModel,
-    getConnections: (provider) => getProviderConnections({ provider, isActive: true }),
-    getUsage,
-  });
+/**
+ * Combo hook: skip when every active account is at its cap.
+ * Warm path: if every account already has cache/last-good quotas, decide without
+ * awaiting provider usage HTTP — refresh stale rows in the background.
+ */
+export async function shouldSkipComboModel(modelStr) {
+  const parsed = parseModel(modelStr);
+  const provider = parsed?.provider;
+  if (!provider) return false;
+
+  let connections;
+  try {
+    connections = await getProviderConnections({ provider, isActive: true });
+  } catch {
+    return false;
+  }
+  if (!Array.isArray(connections) || connections.length === 0) return false;
+
+  const snapshots = [];
+  const refresh = [];
+  for (const connection of connections) {
+    const { usage, needsRefresh } = peekUsage(connection);
+    if (!usage?.quotas) {
+      return evaluateComboModelSkip(modelStr, {
+        parseModel,
+        getConnections: async () => connections,
+        getUsage,
+      });
+    }
+    snapshots.push(usage.quotas);
+    if (needsRefresh) refresh.push(connection);
+  }
+
+  for (const connection of refresh) kickBackgroundRefresh(connection);
+  return shouldSkipModelForUtilization(snapshots, parsed.model);
 }
 
 /** Test helpers */
@@ -131,4 +200,8 @@ export function _rememberUsageForTests(id, usage) {
 
 export function _lastGoodOrUnavailableForTests(id) {
   return lastGoodOrUnavailable(id);
+}
+
+export function _peekUsageForTests(connection) {
+  return peekUsage(connection);
 }
