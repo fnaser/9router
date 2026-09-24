@@ -5,6 +5,7 @@
 import { checkFallbackError, formatRetryAfter } from "./accountFallback.js";
 import { unavailableResponse } from "../utils/error.js";
 import { getCapabilitiesForModel } from "../providers/capabilities.js";
+import { STREAM_FIRST_CHUNK_TIMEOUT_MS } from "../config/runtimeConfig.js";
 import { extractTextContent } from "../translator/formats/gemini.js";
 
 // Hard capabilities = input modalities; missing one drops request data (e.g. image
@@ -14,6 +15,166 @@ const HARD_CAPS = new Set(["vision", "pdf", "audioInput", "videoInput"]);
 // Prefixes used when flattening tool turns into plain prose for panel models.
 const TOOL_CALL_PREFIX = "[Called tools: ";
 const TOOL_RESULT_PREFIX = "[Tool result: ";
+
+// Content types whose bodies the empty-stream guard is allowed to touch.
+// combo.js is shared with tts/search/image/fetch, whose 200s are audio, images
+// or plain JSON — reading those would consume a body the caller still needs.
+const SSE_CONTENT_TYPE = "text/event-stream";
+
+// Byte budget for the empty-stream peek. Bounds how much of a chatty
+// non-content stream is buffered for replay before the guard gives up and
+// passes the stream through. 256 KiB is far above any real preamble.
+const PEEK_MAX_BYTES = 256 * 1024;
+
+// Does an SSE data frame carry output the client can actually render or act on?
+// Role announcements, finish_reason, message envelopes and zero-token usage
+// frames do not count — a stream made only of those is the empty case (#3463).
+function frameCarriesContent(line) {
+  if (!line.startsWith("data:")) return false;
+  const payload = line.slice(5).trim();
+  if (!payload || payload === "[DONE]") return false;
+
+  let parsed;
+  try {
+    parsed = JSON.parse(payload);
+  } catch {
+    return false;
+  }
+
+  if (hasOutputTokens(parsed.usage) || hasOutputTokens(parsed.response?.usage)) return true;
+
+  const delta = parsed.choices?.[0]?.delta;
+  if (nonEmptyString(delta?.content)) return true;
+  if (nonEmptyString(delta?.reasoning_content) || nonEmptyString(delta?.reasoning)) return true;
+  if (delta?.tool_calls?.length || delta?.function_call) return true;
+
+  if (parsed.type === "content_block_delta") {
+    const d = parsed.delta;
+    if (nonEmptyString(d?.text) || nonEmptyString(d?.partial_json) || nonEmptyString(d?.thinking)) return true;
+  }
+  if (parsed.type === "content_block_start" && parsed.content_block?.type === "tool_use") return true;
+
+  if (typeof parsed.type === "string" && parsed.type.endsWith(".delta") && nonEmptyString(parsed.delta)) return true;
+
+  const parts = parsed.candidates?.[0]?.content?.parts;
+  if (Array.isArray(parts) && parts.some((p) => nonEmptyString(p?.text) || p?.functionCall || p?.inlineData)) return true;
+
+  if (nonEmptyString(parsed.message?.content) || nonEmptyString(parsed.response)) return true;
+  if (parsed.message?.tool_calls?.length) return true;
+
+  return false;
+}
+
+function nonEmptyString(v) {
+  return typeof v === "string" && v.length > 0;
+}
+
+function hasOutputTokens(usage) {
+  if (!usage || typeof usage !== "object") return false;
+  const n = Number(
+    usage.completion_tokens ?? usage.output_tokens ?? usage.candidatesTokenCount ?? 0
+  );
+  return Number.isFinite(n) && n > 0;
+}
+
+/**
+ * Read a streaming provider response until the first frame that carries content.
+ * HTTP 200 alone is not enough — a keepalive-only SSE that closes cleanly must
+ * fall through to the next combo model (#3463). When content is found, `body`
+ * replays buffered bytes then continues from the live reader.
+ */
+async function peekStreamForContent(response, timeoutMs = STREAM_FIRST_CHUNK_TIMEOUT_MS) {
+  const contentType = (response.headers.get("content-type") || "").toLowerCase();
+  if (!contentType.includes(SSE_CONTENT_TYPE) || !response.body) {
+    return { hasContent: true, body: null };
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8", { fatal: false });
+  const rawChunks = [];
+  let rawBytes = 0;
+  let pending = "";
+  let hasContent = false;
+  let upstreamDone = false;
+
+  const deadline = Date.now() + timeoutMs;
+  let timer = null;
+  const expiry = new Promise((resolve) => {
+    timer = setTimeout(() => resolve({ timedOut: true }), timeoutMs);
+  });
+
+  try {
+    while (!hasContent) {
+      if (Date.now() >= deadline) break;
+      const next = await Promise.race([reader.read(), expiry]);
+      if (next?.timedOut) break;
+
+      const { done, value } = next;
+      if (done) {
+        upstreamDone = true;
+        pending += decoder.decode();
+        if (pending.trim() && frameCarriesContent(pending.trim())) hasContent = true;
+        break;
+      }
+
+      rawChunks.push(value);
+      rawBytes += value.byteLength;
+      pending += decoder.decode(value, { stream: true });
+
+      let newline;
+      while ((newline = pending.indexOf("\n")) !== -1) {
+        const line = pending.slice(0, newline).trim();
+        pending = pending.slice(newline + 1);
+        if (frameCarriesContent(line)) {
+          hasContent = true;
+          break;
+        }
+      }
+      if (hasContent) break;
+
+      if (rawBytes >= PEEK_MAX_BYTES) {
+        hasContent = true;
+        break;
+      }
+    }
+  } catch {
+    hasContent = false;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+
+  if (!hasContent) {
+    await reader.cancel().catch(() => {});
+    return { hasContent: false, body: null };
+  }
+
+  const body = new ReadableStream({
+    start(controller) {
+      for (const chunk of rawChunks) controller.enqueue(chunk);
+      rawChunks.length = 0;
+      if (upstreamDone) controller.close();
+    },
+    async pull(controller) {
+      if (upstreamDone) return;
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          upstreamDone = true;
+          controller.close();
+          return;
+        }
+        controller.enqueue(value);
+      } catch (error) {
+        controller.error(error);
+      }
+    },
+    cancel(reason) {
+      reader.cancel(reason).catch(() => {});
+    },
+  });
+
+  return { hasContent: true, body };
+}
 
 // Flatten tool turns into prose so panel models keep the context but can't loop
 // on tools: drop the request's tools, turn tool/function results into assistant
@@ -325,10 +486,25 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
     try {
       const result = await handleSingleModel(body, modelStr);
       
-      // Success (2xx) - return response
+      // Success (2xx) — but a 200 is not proof of a usable answer. A provider can
+      // open an SSE stream, send nothing but keepalives and close cleanly; that
+      // must fall through to the next model rather than be handed to the client.
       if (result.ok) {
-        log.info("COMBO", `Model ${modelStr} succeeded`);
-        return result;
+        const { hasContent, body: replayBody } = await peekStreamForContent(result);
+        if (hasContent) {
+          log.info("COMBO", `Model ${modelStr} succeeded`);
+          if (!replayBody) return result;
+          return new Response(replayBody, {
+            status: result.status,
+            statusText: result.statusText,
+            headers: result.headers,
+          });
+        }
+
+        lastError = "provider returned an empty stream";
+        if (!lastStatus) lastStatus = 503;
+        log.warn("COMBO", `Model ${modelStr} returned an empty stream, trying next`);
+        continue;
       }
 
       // Extract error info from response

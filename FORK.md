@@ -11,6 +11,9 @@ A fork of [decolua/9router](https://github.com/decolua/9router) for running Clau
 - **Cursor sessions.** Import probes the live DashboardService API (revoked tokens fail import / Test Connection). Re-importing the same `machineId` updates that row; a second Cursor user on the same Mac warns that Cursor only keeps one live session per machine.
 - **Local-only defaults.** `npm start` listens on `127.0.0.1` only, and the data directory is created owner-only (`0700`), since it holds provider tokens.
 - **Token refresh at boot.** Proactive OAuth refresh starts when the server starts. Upstream starts it only once the dashboard is opened.
+- **Empty-stream combo failover.** A streaming HTTP 200 that closes with only keepalives / zero usable frames falls through to the next combo model instead of returning an empty answer to the client (upstream issue [#3463](https://github.com/decolua/9router/issues/3463) / PR [#3560](https://github.com/decolua/9router/pull/3560)).
+- **Slim dashboard.** Sidebar keeps Endpoint / Providers / Combos / Usage / Quota (+ Profile). Token Saver, CLI Tools, Media, Proxy Pools, Skills, and Console are commented out. OAuth Providers pins `claude` / `codex` / `cursor` / `xai` first.
+- **MITM hard-skip.** Even if settings say MITM is on, auto-start requires `FORK_ENABLE_MITM=1`. Leave it unset.
 
 ## Set up on a new machine
 
@@ -31,7 +34,7 @@ Then, at http://127.0.0.1:20127/dashboard:
 3. **Endpoint:** create an API key. Chat requests need one, even from localhost.
 4. **Combos:** create a combo, for example `subs`, with Claude first, then Codex, then Cursor, then Grok. Pick model ids from `curl http://127.0.0.1:20127/v1/models`.
 
-Leave tunnels, Tailscale and the MITM proxy off in settings. They expose the dashboard or install a local certificate authority.
+Leave tunnels, Tailscale and the MITM proxy off in settings. They expose the dashboard or install a local certificate authority. MITM will not auto-start on this fork unless `FORK_ENABLE_MITM=1`. Optional: `MODEL_CATALOG_SYNC=off` skips the half-meg catalog refresh you do not need for four providers.
 
 ### Personal vs company accounts
 
@@ -92,16 +95,25 @@ Stop it with `launchctl bootout gui/$(id -u)/com.fnaser.9router`. After pulling 
 git remote add upstream https://github.com/decolua/9router.git   # once
 git fetch upstream
 git merge upstream/master
+npm run test:fork
+```
+
+`test:fork` runs the vitest subset that guards this path (utilization gate / last-good / warm path, Cursor usage, Retry-After / billing / safeguards, connection tier, empty-stream failover). Equivalent manual list:
+
+```bash
 cd tests && npm install && npx vitest run \
   unit/utilization-gate.test.js \
   unit/utilization-skip-last-good.test.js \
+  unit/utilization-skip-warm-path.test.js \
   unit/cursor-usage.test.js \
   unit/combo-retry-after.test.js \
   unit/retry-after-backoff.test.js \
   unit/glm-error-classification.test.js \
   unit/upstream-retry-after.test.js \
   unit/account-fallback-4xx.test.js \
-  unit/claude-passthrough-safeguards.test.js
+  unit/claude-passthrough-safeguards.test.js \
+  unit/connection-tier.test.js \
+  unit/combo-empty-stream-3463.test.js
 ```
 
 Conflicts usually land in `open-sse/services/combo.js`, `src/sse/handlers/chat.js`, `open-sse/handlers/chatCore.js` and `open-sse/utils/error.js`. If upstream re-adds a background refresh start in `custom-server.js` or `initializeApp.js`, drop it: `src/instrumentation.js` is the only place that should start it.
