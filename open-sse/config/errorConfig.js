@@ -83,10 +83,11 @@ export const ERROR_RULES = [
   // (and must not lock the account — cooldownMs 0).
   { text: "extra inputs are not permitted", cooldownMs: 0 },
 
-  // Synthetic connect-timeout 502s from BaseExecutor. A 30s model lock here
-  // cascades under parallel Claude Code sessions (sibling turns all see
-  // "all accounts locked"). Fall through immediately with no lock.
-  { text: "fetch connect timeout", cooldownMs: 0 },
+  // Synthetic connect-timeout 502s from BaseExecutor. A long model lock (30s)
+  // cascades under parallel Claude Code sessions. Zero lock re-selects the same
+  // hung account on every concurrent turn (each burning a full connect wait).
+  // Short soft cool: siblings skip this account briefly; combo still moves on.
+  { text: "fetch connect timeout", cooldownMs: 10 * 1000 },
 
   { text: "rate limit",               backoff: true },
   { text: "too many requests",        backoff: true },
