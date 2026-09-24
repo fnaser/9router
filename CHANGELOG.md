@@ -3,10 +3,12 @@
 Fork-only changes on top of upstream v0.5.86. See [FORK.md](./FORK.md).
 
 ## Fixes
+- **Combo / empty stream:** HTTP 200 SSE that closes with only keepalives / zero usable frames falls through to the next combo model (upstream #3463 / PR #3560)
 - **Combo / Claude:** strip Claude Code `safeguards` so “Extra inputs are not permitted” can fall through; do not lock accounts on synthetic `fetch connect timeout` 502s (`cooldownMs: 0`)
 - **Utilization gate:** map Claude Team `extra_usage` to `On-demand`; when weekly/session is full but extra is under 25%, keep the account eligible
 - **Usage probe:** reuse last-good quotas for up to 15 minutes on timeout/soft failure instead of fail-open
 - **Cursor:** fetch `GetCurrentPeriodUsage` as a `Billing period` meter (95% skip); live-probe tokens on import and Test Connection; dedupe oauth by `machineId` and warn on a second account sharing the same Mac; raise HTTP/2 timeout to 200s
+- **Fork UX:** slim sidebar; pin claude/codex/cursor/xai on Providers; `npm run test:fork`; MITM auto-start requires `FORK_ENABLE_MITM=1`
 
 # v0.5.86 (2026-09-23)
 
