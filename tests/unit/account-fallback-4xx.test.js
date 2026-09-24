@@ -39,7 +39,7 @@ describe("checkFallbackError — request-scoped vs account-scoped failures", () 
 
   it("falls through synthetic connect-timeout 502 with a short soft cool", () => {
     const result = checkFallbackError(502, "[502]: fetch connect timeout");
-    expect(result).toEqual({ shouldFallback: true, cooldownMs: 10_000, terminal: false });
+    expect(result).toEqual({ shouldFallback: true, cooldownMs: 20_000, terminal: false });
   });
 
   it("keeps the transient cooldown for unmatched server errors", () => {

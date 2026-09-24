@@ -4,9 +4,11 @@ import {
   evaluateComboModelSkip,
   shouldSkipModelForUtilization,
 } from "open-sse/services/utilizationGate.js";
+import { isModelLockActive } from "open-sse/services/accountFallback.js";
 import { getProviderConnections } from "@/lib/localDb";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { checkAndRefreshToken } from "./tokenRefresh.js";
+import { isProviderTripped } from "./providerCircuit.js";
 
 const CACHE_MS = 3 * 60 * 1000;
 const FAILURE_CACHE_MS = 60 * 1000;
@@ -151,7 +153,8 @@ async function getUsage(connection) {
 }
 
 /**
- * Combo hook: skip when every active account is at its cap.
+ * Combo hook: skip when every active account is at its cap, all accounts are
+ * model-locked, or the provider just connect-timed-out (in-process circuit).
  * Warm path: if every account already has cache/last-good quotas, decide without
  * awaiting provider usage HTTP — refresh stale rows in the background.
  */
@@ -160,6 +163,10 @@ export async function shouldSkipComboModel(modelStr) {
   const provider = parsed?.provider;
   if (!provider) return false;
 
+  // Parallel turns: after one connect timeout, skip this provider for ~20s so
+  // siblings do not each burn FETCH_CONNECT_TIMEOUT_MS on the same hung peer.
+  if (isProviderTripped(provider)) return true;
+
   let connections;
   try {
     connections = await getProviderConnections({ provider, isActive: true });
@@ -167,6 +174,9 @@ export async function shouldSkipComboModel(modelStr) {
     return false;
   }
   if (!Array.isArray(connections) || connections.length === 0) return false;
+
+  const model = parsed.model;
+  if (connections.every((c) => isModelLockActive(c, model))) return true;
 
   const snapshots = [];
   const refresh = [];
