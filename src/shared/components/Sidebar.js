@@ -20,24 +20,28 @@ const COMBINED_WEB_ITEM = { id: "web", label: "Web Fetch & Search", icon: "trave
 const navItems = [
   { href: "/dashboard/endpoint", label: "Endpoint & Key", icon: "api" },
   { href: "/dashboard/providers", label: "Providers", icon: "dns" },
-  // { href: "/dashboard/basic-chat", label: "Basic Chat", icon: "chat" }, // Hidden
   { href: "/dashboard/combos", label: "Combo & Vision Adapter", icon: "layers" },
   { href: "/dashboard/usage", label: "Usage", icon: "bar_chart" },
   { href: "/dashboard/quota", label: "Quota Tracker", icon: "data_usage" },
-  { href: "/dashboard/token-saver", label: "Token Saver", icon: "savings" },
-  // { href: "/dashboard/pxpipe", label: "PXPIPE", icon: "image" },
-  { href: "/dashboard/cli-tools", label: "CLI Tools", icon: "terminal" },
+  // Fork: Token Saver / CLI Tools stay out of the default nav (merge-friendly hide).
+  // { href: "/dashboard/token-saver", label: "Token Saver", icon: "savings" },
+  // { href: "/dashboard/cli-tools", label: "CLI Tools", icon: "terminal" },
 ];
 
 const debugItems = [
-  { href: "/dashboard/console-log", label: "Console Log", icon: "terminal" },
+  // Fork: console/translator hidden unless enableTranslator still exposes Translator below.
+  // { href: "/dashboard/console-log", label: "Console Log", icon: "terminal" },
   { href: "/dashboard/translator", label: "Translator", icon: "translate" },
 ];
 
 const systemItems = [
-  { href: "/dashboard/proxy-pools", label: "Proxy Pools", icon: "lan" },
-  { href: "/dashboard/skills", label: "Skills", icon: "extension" },
+  // Fork: Proxy Pools / Skills out of day-to-day nav.
+  // { href: "/dashboard/proxy-pools", label: "Proxy Pools", icon: "lan" },
+  // { href: "/dashboard/skills", label: "Skills", icon: "extension" },
 ];
+
+// Fork: hide Media Providers section (embedding/image/video/tts sprawl).
+const FORK_HIDE_MEDIA = true;
 
 export default function Sidebar({ onClose }) {
   const pathname = usePathname();
@@ -182,13 +186,15 @@ export default function Sidebar({ onClose }) {
             </Link>
           ))}
 
-          {/* System section */}
+          {/* System section — fork: media / proxy / skills / console hidden */}
           <div className="pt-3 mt-2 space-y-0.5">
             <p className="px-4 text-xs font-semibold text-text-muted/60 uppercase tracking-wider mb-2">
               System
             </p>
 
             {/* Media Providers accordion */}
+            {!FORK_HIDE_MEDIA && (
+            <>
             <button
               onClick={() => setMediaOpen((v) => !v)}
               className={cn(
@@ -243,6 +249,8 @@ export default function Sidebar({ onClose }) {
                   <span className="text-sm">{COMBINED_WEB_ITEM.label}</span>
                 </Link>
               </div>
+            )}
+            </>
             )}
 
             {systemItems.map((item) => (

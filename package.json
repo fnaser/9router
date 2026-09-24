@@ -14,7 +14,8 @@
     "build:bun": "bun --bun next build --webpack",
     "start:bun": "bun ./.next/standalone/custom-server.js",
     "cli:pack": "npm --prefix cli run pack:cli",
-    "cli:publish": "npm --prefix cli run publish:cli"
+    "cli:publish": "npm --prefix cli run publish:cli",
+    "test:fork": "cd tests && npx vitest run unit/utilization-gate.test.js unit/utilization-skip-last-good.test.js unit/utilization-skip-warm-path.test.js unit/cursor-usage.test.js unit/combo-retry-after.test.js unit/retry-after-backoff.test.js unit/glm-error-classification.test.js unit/upstream-retry-after.test.js unit/account-fallback-4xx.test.js unit/claude-passthrough-safeguards.test.js unit/connection-tier.test.js unit/combo-empty-stream-3463.test.js"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

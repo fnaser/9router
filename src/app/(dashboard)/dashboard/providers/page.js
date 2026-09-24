@@ -315,6 +315,13 @@ export default function ProvidersPage() {
     ),
     "oauth",
   );
+  // Fork: pin the day-to-day path (claude/codex/cursor/xai) to the front of OAuth.
+  const FORK_PINNED = new Set(["claude", "codex", "cursor", "xai", "grok-cli"]);
+  oauthEntries.sort(([a], [b]) => {
+    const pa = FORK_PINNED.has(a) ? 0 : 1;
+    const pb = FORK_PINNED.has(b) ? 0 : 1;
+    return pa - pb;
+  });
   const freeEntries = Object.entries(FREE_PROVIDERS)
     .filter(
       ([key, info]) =>

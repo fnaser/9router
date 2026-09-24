@@ -100,9 +100,15 @@ async function runHeavyStartup() {
   if (settings.tunnelEnabled) ensureCloudflared().catch(() => {});
 
   if (settings.mitmEnabled) {
-    // Sync mitmAlias DB → JSON cache so standalone MITM server can read it.
-    syncMitmAliasCache().catch(() => {});
-    autoStartMitm(settings);
+    // Fork: require FORK_ENABLE_MITM=1 so a flipped dashboard toggle cannot
+    // auto-start MITM/DNS on a local loopback gateway.
+    if (process.env.FORK_ENABLE_MITM !== "1") {
+      console.log("[InitApp] MITM enabled in settings but FORK_ENABLE_MITM!=1; skipping auto-start");
+    } else {
+      // Sync mitmAlias DB → JSON cache so standalone MITM server can read it.
+      syncMitmAliasCache().catch(() => {});
+      autoStartMitm(settings);
+    }
   }
 
   configureTunnelMonitoring(settings);
