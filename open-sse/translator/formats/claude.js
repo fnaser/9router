@@ -204,6 +204,12 @@ function hasForeignServerToolUseId(block) {
 export function normalizeClaudePassthrough(body, model = "") {
   if (!body || typeof body !== "object") return body;
 
+  // Claude Code occasionally sends experimental top-level fields Anthropic's
+  // Messages API rejects with 400 "safeguards: Extra inputs are not permitted".
+  // Drop them on passthrough so a combo can still reach the upstream (or fall
+  // through cleanly if something else is wrong).
+  if ("safeguards" in body) delete body.safeguards;
+
   // 1. Downgrade adaptive thinking for models that don't support it
   if (body.thinking?.type === "adaptive" && ADAPTIVE_THINKING_UNSUPPORTED.test(model)) {
     body.thinking = { type: "enabled", budget_tokens: 10000 };

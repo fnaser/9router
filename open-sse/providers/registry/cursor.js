@@ -55,4 +55,7 @@ export default {
       machineId: "storage.serviceMachineId",
     },
   },
+  features: {
+    usage: true,
+  },
 };

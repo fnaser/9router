@@ -7,10 +7,12 @@ import { checkAndRefreshToken } from "./tokenRefresh.js";
 
 const CACHE_MS = 3 * 60 * 1000;
 const FAILURE_CACHE_MS = 60 * 1000;
+const LAST_GOOD_MAX_AGE_MS = 15 * 60 * 1000;
 const USAGE_FETCH_TIMEOUT_MS = 3000;
 const UNAVAILABLE = { message: "usage unavailable" };
 const TIMED_OUT = Symbol("usage timeout");
 const cache = new Map();
+const lastGood = new Map();
 const inflight = new Map();
 
 function proxyOptionsFrom(cfg) {
@@ -57,16 +59,28 @@ function withTimeout(promise, ms) {
 }
 
 function remember(id, usage) {
-  if (id) cache.set(id, { at: Date.now(), usage });
+  if (!id) return;
+  cache.set(id, { at: Date.now(), usage });
+  if (usage?.quotas) lastGood.set(id, { at: Date.now(), usage });
+}
+
+function lastGoodOrUnavailable(id) {
+  const hit = id ? lastGood.get(id) : null;
+  if (hit?.usage?.quotas && Date.now() - hit.at < LAST_GOOD_MAX_AGE_MS) {
+    return hit.usage;
+  }
+  return UNAVAILABLE;
 }
 
 // A failed or slow read is remembered briefly so a hung usage endpoint does not
 // cost the timeout on every request. A late success still fills the cache.
+// On timeout/error, reuse the last good quotas (up to 15m) so the utilization
+// gate can still skip accounts that were already near/at cap.
 async function getUsage(connection) {
   const id = connection?.id;
   const hit = id ? cache.get(id) : null;
   if (hit && Date.now() - hit.at < (hit.usage ? CACHE_MS : FAILURE_CACHE_MS)) {
-    return hit.usage || UNAVAILABLE;
+    return hit.usage || lastGoodOrUnavailable(id);
   }
 
   let job = id ? inflight.get(id) : null;
@@ -74,11 +88,11 @@ async function getUsage(connection) {
     job = fetchUsage(connection)
       .then((usage) => {
         remember(id, usage?.quotas ? usage : null);
-        return usage;
+        return usage?.quotas ? usage : lastGoodOrUnavailable(id);
       })
       .catch(() => {
         remember(id, null);
-        return UNAVAILABLE;
+        return lastGoodOrUnavailable(id);
       })
       .finally(() => {
         if (id) inflight.delete(id);
@@ -88,8 +102,9 @@ async function getUsage(connection) {
 
   const usage = await withTimeout(job, USAGE_FETCH_TIMEOUT_MS);
   if (usage === TIMED_OUT) {
-    remember(id, null);
-    return UNAVAILABLE;
+    // Do not wipe last-good — only mark a short failure so we retry soon.
+    if (id) cache.set(id, { at: Date.now(), usage: null });
+    return lastGoodOrUnavailable(id);
   }
   return usage;
 }
@@ -101,4 +116,19 @@ export function shouldSkipComboModel(modelStr) {
     getConnections: (provider) => getProviderConnections({ provider, isActive: true }),
     getUsage,
   });
+}
+
+/** Test helpers */
+export function _resetUtilizationSkipCacheForTests() {
+  cache.clear();
+  lastGood.clear();
+  inflight.clear();
+}
+
+export function _rememberUsageForTests(id, usage) {
+  remember(id, usage);
+}
+
+export function _lastGoodOrUnavailableForTests(id) {
+  return lastGoodOrUnavailable(id);
 }

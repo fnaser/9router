@@ -133,6 +133,23 @@ async function fetchClaudeUsageRaw(accessToken, proxyOptions = null) {
         }
       }
 
+      // Team extra usage (cents). Named so the utilization gate treats it as a
+      // credit row: when weekly/session is full, headroom here still allows the
+      // account; when extra is ≥25% spent and windows are full, skip.
+      const extra = data.extra_usage;
+      if (extra?.is_enabled && Number(extra.monthly_limit) > 0) {
+        const total = Number(extra.monthly_limit);
+        const used = Math.max(0, Number(extra.used_credits) || 0);
+        quotas["On-demand"] = {
+          used,
+          total,
+          remaining: Math.max(0, total - used),
+          remainingPercentage: Math.round(Math.max(0, (total - used) / total) * 100),
+          resetAt: null,
+          unlimited: false,
+        };
+      }
+
       return {
         plan: "Claude Code",
         extraUsage: data.extra_usage ?? null,

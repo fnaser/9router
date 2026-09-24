@@ -12,6 +12,7 @@ export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
   const [accessToken, setAccessToken] = useState("");
   const [machineId, setMachineId] = useState("");
   const [error, setError] = useState(null);
+  const [warning, setWarning] = useState(null);
   const [importing, setImporting] = useState(false);
   const [autoDetecting, setAutoDetecting] = useState(false);
   const [autoDetected, setAutoDetected] = useState(false);
@@ -20,6 +21,7 @@ export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
   const runAutoDetect = async () => {
     setAutoDetecting(true);
     setError(null);
+    setWarning(null);
     setAutoDetected(false);
     setWindowsManual(false);
 
@@ -46,8 +48,14 @@ export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
   // Auto-detect tokens when modal opens
   useEffect(() => {
     if (!isOpen) return;
+    setWarning(null);
     runAutoDetect();
   }, [isOpen]);
+
+  const finishSuccess = () => {
+    onSuccess?.();
+    onClose();
+  };
 
   const handleImportToken = async () => {
     if (!accessToken.trim()) {
@@ -62,6 +70,7 @@ export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
 
     setImporting(true);
     setError(null);
+    setWarning(null);
 
     try {
       const res = await fetch("/api/oauth/cursor/import", {
@@ -79,7 +88,12 @@ export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
         throw new Error(data.error || "Import failed");
       }
 
+      // Refresh the connection list even when we keep the modal open for a warning.
       onSuccess?.();
+      if (data.warning) {
+        setWarning(data.warning);
+        return;
+      }
       onClose();
     } catch (err) {
       setError(err.message);
@@ -110,7 +124,7 @@ export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
         {!autoDetecting && (
           <>
             {/* Success message if auto-detected */}
-            {autoDetected && (
+            {autoDetected && !warning && (
               <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-lg border border-green-200 dark:border-green-800">
                 <div className="flex gap-2">
                   <span className="material-symbols-outlined text-green-600 dark:text-green-400">check_circle</span>
@@ -122,7 +136,7 @@ export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
             )}
 
             {/* Windows manual instructions */}
-            {windowsManual && (
+            {windowsManual && !warning && (
               <div className="bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg border border-amber-200 dark:border-amber-800 flex flex-col gap-2">
                 <div className="flex gap-2 items-center">
                   <span className="material-symbols-outlined text-amber-600 dark:text-amber-400">info</span>
@@ -140,7 +154,7 @@ export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
             )}
 
             {/* Info message if not auto-detected */}
-            {!autoDetected && !windowsManual && !error && (
+            {!autoDetected && !windowsManual && !error && !warning && (
               <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg border border-blue-200 dark:border-blue-800">
                 <div className="flex gap-2">
                   <span className="material-symbols-outlined text-blue-600 dark:text-blue-400">info</span>
@@ -151,32 +165,39 @@ export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
               </div>
             )}
 
-            {/* Access Token Input */}
-            <div>
-              <label className="block text-sm font-medium mb-2">
-                Access Token <span className="text-red-500">*</span>
-              </label>
-              <textarea
-                value={accessToken}
-                onChange={(e) => setAccessToken(e.target.value)}
-                placeholder="Access token will be auto-filled..."
-                rows={3}
-                className="w-full px-3 py-2 text-sm font-mono border border-border rounded-lg bg-background focus:outline-none focus:border-primary resize-none"
-              />
-            </div>
+            {!warning && (
+              <>
+                {/* Access Token Input */}
+                <div>
+                  <label className="block text-sm font-medium mb-2">
+                    Access Token <span className="text-red-500">*</span>
+                  </label>
+                  <textarea
+                    value={accessToken}
+                    onChange={(e) => setAccessToken(e.target.value)}
+                    placeholder="Access token will be auto-filled..."
+                    rows={3}
+                    className="w-full px-3 py-2 text-sm font-mono border border-border rounded-lg bg-background focus:outline-none focus:border-primary resize-none"
+                  />
+                </div>
 
-            {/* Machine ID Input */}
-            <div>
-              <label className="block text-sm font-medium mb-2">
-                Machine ID <span className="text-red-500">*</span>
-              </label>
-              <Input
-                value={machineId}
-                onChange={(e) => setMachineId(e.target.value)}
-                placeholder="Machine ID will be auto-filled..."
-                className="font-mono text-sm"
-              />
-            </div>
+                {/* Machine ID Input */}
+                <div>
+                  <label className="block text-sm font-medium mb-2">
+                    Machine ID <span className="text-red-500">*</span>
+                  </label>
+                  <Input
+                    value={machineId}
+                    onChange={(e) => setMachineId(e.target.value)}
+                    placeholder="Machine ID will be auto-filled..."
+                    className="font-mono text-sm"
+                  />
+                  <p className="mt-1.5 text-xs text-text-muted">
+                    Cursor keeps one live session per machine ID. Importing a second account from the same Mac usually revokes the first.
+                  </p>
+                </div>
+              </>
+            )}
 
             {/* Error Display */}
             {error && (
@@ -185,18 +206,41 @@ export default function CursorAuthModal({ isOpen, onSuccess, onClose }) {
               </div>
             )}
 
+            {/* Shared-machine warning after a successful import */}
+            {warning && (
+              <div className="bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg border border-amber-200 dark:border-amber-800">
+                <div className="flex gap-2">
+                  <span className="material-symbols-outlined text-amber-600 dark:text-amber-400 shrink-0">warning</span>
+                  <div className="flex flex-col gap-1">
+                    <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                      Imported — shared machine ID
+                    </p>
+                    <p className="text-sm text-amber-700 dark:text-amber-300">{warning}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Action Buttons */}
             <div className="flex gap-2">
-              <Button
-                onClick={handleImportToken}
-                fullWidth
-                disabled={importing || !accessToken.trim() || !machineId.trim()}
-              >
-                {importing ? "Importing..." : "Import Token"}
-              </Button>
-              <Button onClick={onClose} variant="ghost" fullWidth>
-                Cancel
-              </Button>
+              {warning ? (
+                <Button onClick={finishSuccess} fullWidth>
+                  Got it
+                </Button>
+              ) : (
+                <>
+                  <Button
+                    onClick={handleImportToken}
+                    fullWidth
+                    disabled={importing || !accessToken.trim() || !machineId.trim()}
+                  >
+                    {importing ? "Importing..." : "Import Token"}
+                  </Button>
+                  <Button onClick={onClose} variant="ghost" fullWidth>
+                    Cancel
+                  </Button>
+                </>
+              )}
             </div>
           </>
         )}

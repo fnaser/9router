@@ -130,7 +130,22 @@ export async function createProviderConnection(data) {
     const all = db.all(`SELECT * FROM providerConnections WHERE provider = ?`, [data.provider]).map(rowToConn);
 
     let existing = null;
-    if (data.authType === "oauth" && data.email) {
+    if (data.authType === "oauth" && data.provider === "cursor" && data.providerSpecificData?.machineId) {
+      // Cursor IDE stores one login per machineId. Re-importing the same Mac
+      // must update that row — not create a second "active" connection that
+      // shares a machineId and dies when the other session is revoked.
+      const incomingMachine = data.providerSpecificData.machineId;
+      const incomingUser = data.providerSpecificData?.userId || data.email;
+      existing = all.find(c => {
+        if (c.authType !== "oauth") return false;
+        if (c.providerSpecificData?.machineId !== incomingMachine) return false;
+        // Prefer matching the same Cursor user when both sides know it.
+        const existingUser = c.providerSpecificData?.userId || c.email;
+        if (incomingUser && existingUser) return incomingUser === existingUser;
+        return true;
+      });
+      // Same machine, different user: leave as a new row but callers should warn.
+    } else if (data.authType === "oauth" && data.email) {
       const incomingUsername = data.providerSpecificData?.username;
       const incomingWs = data.providerSpecificData?.chatgptAccountId;
       existing = all.find(c => {

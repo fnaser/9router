@@ -396,7 +396,7 @@ export class CursorExecutor extends BaseExecutor {
       throw new Error("http2 module not available");
     }
 
-    const HTTP2_TIMEOUT_MS = 60000; // 60s max — prevent hung sessions
+    const HTTP2_TIMEOUT_MS = 200000; // align with STREAM_FIRST_CHUNK_TIMEOUT_MS — heavy Auto turns need >60s
 
     return new Promise((resolve, reject) => {
       const urlObj = new URL(url);

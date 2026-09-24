@@ -91,6 +91,35 @@ describe("utilization gate", () => {
     })).toBe(false);
   });
 
+  it("keeps a Team account when weekly is full but On-demand is under 25%", () => {
+    expect(isAccountAtUtilizationCap({
+      "session (5h)": { used: 99, total: 100, unlimited: false },
+      "weekly (7d)": { used: 97, total: 100, unlimited: false },
+      "On-demand": { used: 10, total: 100, unlimited: false },
+    })).toBe(false);
+  });
+
+  it("skips a Team account when weekly is full and On-demand is at 25%", () => {
+    expect(isAccountAtUtilizationCap({
+      "weekly (7d)": { used: 96, total: 100, unlimited: false },
+      "On-demand": { used: 25, total: 100, unlimited: false },
+    })).toBe(true);
+  });
+
+  it("skips Cursor billing period at 95% (other-meter bucket)", () => {
+    expect(isAccountAtUtilizationCap({
+      "Billing period": { used: 95, total: 100, unlimited: false },
+    })).toBe(true);
+    expect(isAccountAtUtilizationCap({
+      "Billing period": { used: 94, total: 100, unlimited: false },
+      Auto: { used: 99, total: 100, unlimited: false },
+    })).toBe(true);
+    expect(isAccountAtUtilizationCap({
+      "Billing period": { used: 50, total: 100, unlimited: false },
+      Auto: { used: 80, total: 100, unlimited: false },
+    })).toBe(false);
+  });
+
   it("skips a combo model only when every account is at the cap", () => {
     const full = { weekly: { used: 96, total: 100, unlimited: false } };
     const open = { weekly: { used: 40, total: 100, unlimited: false } };

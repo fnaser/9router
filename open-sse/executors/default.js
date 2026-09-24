@@ -159,8 +159,9 @@ export class DefaultExecutor extends BaseExecutor {
     // so the request needs the same beta flags the `claude` provider sends:
     // without `context-management-2025-06-27` upstream rejects the
     // `context_management` block Claude Code puts in every request with
-    // "context_management: Extra inputs are not permitted" (HTTP 400), and the
-    // combo silently falls through to the next model. The model id gates this:
+    // "context_management: Extra inputs are not permitted" (HTTP 400). Without
+    // the beta (or after stripping unknown fields like `safeguards`), that 400
+    // is classified for combo fallthrough. The model id gates this:
     // a node fronting Kimi or GLM answers on its own ids and never matches, so
     // gateways that would choke on unknown beta flags are left untouched.
     const isClaudeModel = typeof model === "string" && /^claude-/.test(model);

@@ -4,8 +4,11 @@ A fork of [decolua/9router](https://github.com/decolua/9router) for running Clau
 
 ## What differs from upstream
 
-- **Utilization gate.** Before a combo sends a request, it skips a model when every active account for that provider is at its cap: 95% used on a session or weekly window (including Weekly SuperGrok), or 25% spent on a credit-only account. Per-model meters (Claude `weekly opus (7d)`, Codex Spark) only count for that model. A missing, failed or slow usage read still sends the request.
+- **Utilization gate.** Before a combo sends a request, it skips a model when every active account for that provider is at its cap: 95% used on a session or weekly window (including Weekly SuperGrok), or 25% spent on a credit-only account. Per-model meters (Claude `weekly opus (7d)`, Codex Spark) only count for that model. A missing, failed or slow usage read still sends the request. Claude Team `extra_usage` maps to an `On-demand` row: when weekly/session is full but extra spend is still under 25%, the account stays eligible. Cursor reports a `Billing period` meter (95% skip) from `GetCurrentPeriodUsage`.
+- **Usage last-good.** The combo utilization probe keeps the last successful quota snapshot for up to 15 minutes. A timed-out or soft-failed Anthropic/Cursor usage read reuses that snapshot instead of failing open and re-hitting a near-cap account.
 - **Retry-After and billing errors.** An upstream cooldown is forwarded as `Retry-After`, including through combos. A billing error (HTTP 402, or a 429 whose body says the balance is empty) does not enter the 429 backoff ladder, and the combo moves on to the next model.
+- **Claude `safeguards` / connect-timeout.** Claude Code sometimes sends a `safeguards` field that Anthropic rejects as “Extra inputs are not permitted”; the translator strips it so the combo can fall through. Synthetic `fetch connect timeout` 502s do not write a 30s account lock — they fall through to the next account immediately.
+- **Cursor sessions.** Import probes the live DashboardService API (revoked tokens fail import / Test Connection). Re-importing the same `machineId` updates that row; a second Cursor user on the same Mac warns that Cursor only keeps one live session per machine.
 - **Local-only defaults.** `npm start` listens on `127.0.0.1` only, and the data directory is created owner-only (`0700`), since it holds provider tokens.
 - **Token refresh at boot.** Proactive OAuth refresh starts when the server starts. Upstream starts it only once the dashboard is opened.
 
@@ -83,7 +86,7 @@ Stop it with `launchctl bootout gui/$(id -u)/com.fnaser.9router`. After pulling 
 git remote add upstream https://github.com/decolua/9router.git   # once
 git fetch upstream
 git merge upstream/master
-cd tests && npm install && npx vitest run unit/utilization-gate.test.js unit/combo-retry-after.test.js unit/retry-after-backoff.test.js unit/glm-error-classification.test.js unit/upstream-retry-after.test.js
+cd tests && npm install && npx vitest run unit/utilization-gate.test.js unit/cursor-usage.test.js unit/combo-retry-after.test.js unit/retry-after-backoff.test.js unit/glm-error-classification.test.js unit/upstream-retry-after.test.js unit/account-fallback-4xx.test.js unit/claude-passthrough-safeguards.test.js
 ```
 
 Conflicts usually land in `open-sse/services/combo.js`, `src/sse/handlers/chat.js`, `open-sse/handlers/chatCore.js` and `open-sse/utils/error.js`. If upstream re-adds a background refresh start in `custom-server.js` or `initializeApp.js`, drop it: `src/instrumentation.js` is the only place that should start it.

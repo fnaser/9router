@@ -263,6 +263,12 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
   }
   if (!shouldFallback) return { shouldFallback: false, cooldownMs: 0 };
 
+  // Fallthrough-only errors (e.g. fetch connect timeout, Extra inputs 400):
+  // try the next combo model / account without writing a model lock.
+  if (!(cooldownMs > 0)) {
+    return { shouldFallback: true, cooldownMs: 0 };
+  }
+
   const reason = typeof errorText === "string" ? errorText.slice(0, 200) : "Provider error";
   const lockUpdate = buildModelLockUpdate(githubResetAtMs ? null : model, cooldownMs);
 

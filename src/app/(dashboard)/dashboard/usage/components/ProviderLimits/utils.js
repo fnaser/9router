@@ -600,6 +600,29 @@ export function parseQuotaData(provider, data) {
         }
         break;
 
+      case "cursor":
+        if (data.message && !data.quotas) {
+          normalizedQuotas.push({
+            name: "error",
+            used: 0,
+            total: 0,
+            resetAt: null,
+            message: data.message,
+          });
+        } else if (data.quotas) {
+          Object.entries(data.quotas).forEach(([name, quota]) => {
+            normalizedQuotas.push({
+              name,
+              used: quota.used || 0,
+              total: quota.total || 0,
+              remaining: quota.remaining !== undefined ? quota.remaining : Math.max(0, (quota.total || 100) - (quota.used || 0)),
+              remainingPercentage: quota.remainingPercentage !== undefined ? quota.remainingPercentage : calculatePercentage(quota.used, quota.total),
+              resetAt: quota.resetAt || null,
+            });
+          });
+        }
+        break;
+
       case "vercel-ai-gateway":
         // Vercel returns currency credit balance, not request quotas.
         // The 'Remaining (USD)' row needs explicit remainingPercentage because

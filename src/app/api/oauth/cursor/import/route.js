@@ -44,9 +44,9 @@ export async function POST(request) {
       provider: "cursor",
       authType: "oauth",
       accessToken: tokenData.accessToken,
-      refreshToken: null, // Cursor doesn't have public refresh endpoint
+      refreshToken: null, // Cursor doesn't expose a public refresh for imported sessions
       expiresAt: new Date(Date.now() + tokenData.expiresIn * 1000).toISOString(),
-      email: userInfo?.email || null,
+      email: userInfo?.email || userInfo?.userId || null,
       providerSpecificData: {
         machineId: tokenData.machineId,
         authMethod: "imported",
@@ -56,8 +56,23 @@ export async function POST(request) {
       testStatus: "active",
     });
 
+    // One Cursor install = one live session per machineId. A second account on
+    // the same Mac usually revokes the first token server-side.
+    let warning = null;
+    try {
+      const { getProviderConnections } = await import("@/lib/localDb");
+      const peers = (await getProviderConnections({ provider: "cursor" }))
+        .filter((c) => c.id !== connection.id
+          && c.providerSpecificData?.machineId === tokenData.machineId);
+      if (peers.length > 0) {
+        warning = "Another Cursor connection already uses this machineId. "
+          + "Cursor only keeps one live session per Mac — the other account will usually return 401 until you re-import it from a separate Cursor profile/machine.";
+      }
+    } catch { /* best-effort */ }
+
     return NextResponse.json({
       success: true,
+      warning,
       connection: {
         id: connection.id,
         provider: connection.provider,
