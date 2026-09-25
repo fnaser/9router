@@ -438,7 +438,9 @@ export function getComboModelsFromData(modelStr, combosData) {
  * @param {number|string} [options.comboStickyLimit=1] - Requests per combo model before switching
  * @param {Function} [options.shouldSkipModel] - (modelStr) => Promise<boolean|string>. Truthy skips before the upstream call; a string is logged as the reason.
  * @param {Set<string>|null} [options.requiredCapabilities] - Precomputed capability set from the outer handler (avoids a second body scan).
- * @returns {Promise<Response>} After a full fallthrough, tries one more pass from the top (no sleep) before returning the all-failed response.
+ * @returns {Promise<Response>} After a full fallthrough with at least one upstream
+ *   attempt, tries one more pass from the top (no sleep) before returning the
+ *   all-failed response. Skips wrap when pass 1 only skipped models.
  */
 export async function handleComboChat({ body, models, handleSingleModel, log, comboName, comboStrategy, comboStickyLimit = 1, autoSwitch = true, shouldSkipModel = null, requiredCapabilities = null }) {
   // Apply rotation strategy if enabled
@@ -464,6 +466,9 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
   // Models that failed with a terminal billing/credit state this request — no
   // point re-hitting them on the wrap pass (e.g. xAI 402 spending-limit).
   const terminalModels = new Set();
+  // True once pass 1 actually called upstream (or threw). Instant wrap is
+  // pointless when every model was only skipped — nothing clears in 0ms.
+  let pass1AttemptedUpstream = false;
 
   // Prefer a real upstream status over a util-skip/empty 503; billing 402 always
   // wins. First non-503 otherwise sticks so a trailing 503 does not mask a 429.
@@ -472,13 +477,18 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
   };
 
   // Two passes max: after a full fallthrough, wrap once from the top with no
-  // sleep so a leg that was only soft-cooled / skipped can be tried again.
-  // Terminal billing failures are not re-attempted on the wrap. Wrap-pass
-  // failures do not rewrite lastStatus (pass 1 outcome stays client-facing).
+  // sleep so a leg that was only soft-cooled can be tried again if pass 1
+  // actually hit upstream. Terminal billing failures are not re-attempted on
+  // the wrap. Wrap-pass failures do not rewrite lastStatus (pass 1 outcome
+  // stays client-facing).
   const MAX_PASSES = 2;
 
   for (let pass = 1; pass <= MAX_PASSES; pass++) {
     if (pass > 1) {
+      if (!pass1AttemptedUpstream) {
+        log.info("COMBO", "Skipping wrap: first pass only skipped models");
+        break;
+      }
       const anyRetryable = rotatedModels.some((m) => !terminalModels.has(m));
       if (!anyRetryable) {
         log.info("COMBO", "Skipping wrap: every model failed with a terminal billing error");
@@ -524,6 +534,7 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       }
 
       try {
+        if (pass === 1) pass1AttemptedUpstream = true;
         const result = await handleSingleModel(body, modelStr);
 
         // Success (2xx) — but a 200 is not proof of a usable answer. A provider can

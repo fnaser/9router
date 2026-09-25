@@ -26,9 +26,11 @@ import {
 } from "../../src/sse/services/utilizationSkip.js";
 
 describe("utilizationSkip warm path", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     _resetUtilizationSkipCacheForTests();
     vi.clearAllMocks();
+    const { _resetProviderCircuitForTests } = await import("../../src/sse/services/providerCircuit.js");
+    _resetProviderCircuitForTests();
   });
 
   it("peeks short-cache quotas without needing refresh", () => {
@@ -65,16 +67,32 @@ describe("utilizationSkip warm path", () => {
     expect(getUsageForProvider).toHaveBeenCalled();
   });
 
-  it("reports provider circuit as the skip reason", async () => {
-    const { tripProvider, _resetProviderCircuitForTests } = await import("../../src/sse/services/providerCircuit.js");
+  it("reports provider circuit when every active connection is tripped", async () => {
+    const { tripConnection, _resetProviderCircuitForTests } = await import("../../src/sse/services/providerCircuit.js");
     _resetProviderCircuitForTests();
-    tripProvider("claude", 60_000);
+    tripConnection("a1", 60_000);
     getProviderConnections.mockResolvedValue([{ id: "a1", provider: "claude", isActive: true }]);
 
     const skip = await shouldSkipComboModel("cc/claude-opus-4-6");
     expect(skip).toEqual({ reason: "provider circuit", retryAfterMs: expect.any(Number) });
     expect(skip.retryAfterMs).toBeGreaterThan(50_000);
     expect(getUsageForProvider).not.toHaveBeenCalled();
+    _resetProviderCircuitForTests();
+  });
+
+  it("does not skip for circuit when a sibling connection is still healthy", async () => {
+    const { tripConnection, _resetProviderCircuitForTests } = await import("../../src/sse/services/providerCircuit.js");
+    _resetProviderCircuitForTests();
+    tripConnection("a1", 60_000);
+    getProviderConnections.mockResolvedValue([
+      { id: "a1", provider: "claude", isActive: true },
+      { id: "a2", provider: "claude", isActive: true },
+    ]);
+    _rememberUsageForTests("a1", { quotas: { "weekly (7d)": { used: 10, total: 100 } } });
+    _rememberUsageForTests("a2", { quotas: { "weekly (7d)": { used: 10, total: 100 } } });
+
+    const skip = await shouldSkipComboModel("cc/claude-opus-4-6");
+    expect(skip).toBe(false);
     _resetProviderCircuitForTests();
   });
 

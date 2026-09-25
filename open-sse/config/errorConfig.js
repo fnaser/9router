@@ -90,7 +90,8 @@ export const ERROR_RULES = [
   // Synthetic connect-timeout 502s from BaseExecutor. One attempt only (no 502
   // retry ladder). Dual defense for parallel turns:
   //   1) cooldownMs → brief modelLock_* so account selection skips the peer
-  //   2) providerCircuit (same duration) → combo shouldSkipComboModel skips the provider
+  //   2) per-connection circuit (same duration) → combo shouldSkipComboModel
+  //      skips the provider only when every active connection is tripped
   // A long lock (30s+) used to cascade under parallel Claude Code sessions.
   { text: "fetch connect timeout", cooldownMs: CONNECT_TIMEOUT_SOFT_COOL_MS },
 

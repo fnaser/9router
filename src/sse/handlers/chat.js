@@ -26,7 +26,7 @@ import { updateProviderCredentials, checkAndRefreshToken } from "../services/tok
 import { getProjectIdForConnection } from "open-sse/services/projectId.js";
 import { stripModelContextMarker } from "open-sse/utils/modelMarkers.js";
 import { shouldSkipComboModel } from "../services/utilizationSkip.js";
-import { tripProvider, clearProviderTrip } from "../services/providerCircuit.js";
+import { tripConnection, clearConnectionTrip } from "../services/providerCircuit.js";
 
 /**
  * Route a named combo (or fusion) through the shared combo handlers.
@@ -323,7 +323,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
     });
 
     if (result.success) {
-      clearProviderTrip(provider);
+      clearConnectionTrip(credentials.connectionId);
       return result.response;
     }
 
@@ -345,7 +345,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       : (await markAccountUnavailable(credentials.connectionId, result.status, result.error, provider, model, resetsAtMs)).shouldFallback;
 
     if (/fetch connect timeout/i.test(String(result.error || ""))) {
-      tripProvider(provider);
+      tripConnection(credentials.connectionId);
     }
 
     if (shouldFallback) {
