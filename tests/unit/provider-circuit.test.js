@@ -4,10 +4,6 @@ import {
   clearConnectionTrip,
   getConnectionTripRemainingMs,
   getAllConnectionsTrip,
-  tripProvider,
-  isProviderTripped,
-  clearProviderTrip,
-  getProviderTripRemainingMs,
   _resetProviderCircuitForTests,
   _tripUntilForTests,
 } from "../../src/sse/services/providerCircuit.js";
@@ -69,13 +65,12 @@ describe("providerCircuit (per-connection)", () => {
     expect(getAllConnectionsTrip([])).toEqual({ allTripped: false, retryAfterMs: 0 });
   });
 
-  // Deprecated provider-keyed aliases still work (keyed by whatever string is passed).
-  it("deprecated tripProvider aliases still trip by key", () => {
-    expect(isProviderTripped("claude")).toBe(false);
-    tripProvider("claude");
-    expect(isProviderTripped("claude")).toBe(true);
-    expect(getProviderTripRemainingMs("claude")).toBeGreaterThan(0);
-    clearProviderTrip("claude");
-    expect(isProviderTripped("claude")).toBe(false);
+  it("ignores empty connection ids", () => {
+    tripConnection("", 10_000);
+    expect(getConnectionTripRemainingMs("")).toBe(0);
+    expect(getAllConnectionsTrip([null, undefined, ""])).toEqual({
+      allTripped: false,
+      retryAfterMs: 0,
+    });
   });
 });

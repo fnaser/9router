@@ -1,8 +1,11 @@
 /**
  * In-process circuit for connections that just connect-timed-out.
- * Keyed by connectionId so a healthy sibling account for the same provider
- * can still be tried. Combo skips the provider only when every active
- * connection is tripped.
+ * Keyed by connectionId so a healthy sibling for the same provider can still
+ * be tried. Combo skips only when every active connection is tripped.
+ *
+ * Complements the DB modelLock_* soft cool from ERROR_RULES: the lock drives
+ * account selection across restarts; this map is the fast path for parallel
+ * turns in the same process.
  */
 
 import { CONNECT_TIMEOUT_SOFT_COOL_MS } from "open-sse/config/errorConfig.js";
@@ -49,26 +52,6 @@ export function getAllConnectionsTrip(connectionIds) {
     if (rem < minRem) minRem = rem;
   }
   return { allTripped: true, retryAfterMs: minRem === Infinity ? 0 : minRem };
-}
-
-/** @deprecated Use tripConnection — kept for tests that trip by a synthetic id. */
-export function tripProvider(providerOrId, ms = CONNECT_TIMEOUT_SOFT_COOL_MS) {
-  tripConnection(providerOrId, ms);
-}
-
-/** @deprecated Use getConnectionTripRemainingMs */
-export function isProviderTripped(providerOrId) {
-  return getConnectionTripRemainingMs(providerOrId) > 0;
-}
-
-/** @deprecated Use getConnectionTripRemainingMs */
-export function getProviderTripRemainingMs(providerOrId) {
-  return getConnectionTripRemainingMs(providerOrId);
-}
-
-/** @deprecated Use clearConnectionTrip */
-export function clearProviderTrip(providerOrId) {
-  clearConnectionTrip(providerOrId);
 }
 
 /** Test helpers */
