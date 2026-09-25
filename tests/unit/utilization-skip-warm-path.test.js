@@ -52,7 +52,7 @@ describe("utilizationSkip warm path", () => {
     _rememberUsageForTests("a1", { quotas: { "weekly (7d)": { used: 97, total: 100 } } });
 
     const skip = await shouldSkipComboModel("cc/claude-opus-4-6");
-    expect(skip).toBe(true);
+    expect(skip).toBe("utilization cap");
     expect(getUsageForProvider).not.toHaveBeenCalled();
   });
 
@@ -63,5 +63,31 @@ describe("utilizationSkip warm path", () => {
     const skip = await shouldSkipComboModel("cc/claude-opus-4-6");
     expect(skip).toBe(false);
     expect(getUsageForProvider).toHaveBeenCalled();
+  });
+
+  it("reports provider circuit as the skip reason", async () => {
+    const { tripProvider, _resetProviderCircuitForTests } = await import("../../src/sse/services/providerCircuit.js");
+    _resetProviderCircuitForTests();
+    tripProvider("claude", 60_000);
+    getProviderConnections.mockResolvedValue([{ id: "a1", provider: "claude", isActive: true }]);
+
+    const skip = await shouldSkipComboModel("cc/claude-opus-4-6");
+    expect(skip).toBe("provider circuit");
+    expect(getUsageForProvider).not.toHaveBeenCalled();
+    _resetProviderCircuitForTests();
+  });
+
+  it("reports model locked when every account has an active lock", async () => {
+    const until = new Date(Date.now() + 60_000).toISOString();
+    getProviderConnections.mockResolvedValue([{
+      id: "a1",
+      provider: "claude",
+      isActive: true,
+      "modelLock_claude-opus-4-6": until,
+    }]);
+
+    const skip = await shouldSkipComboModel("cc/claude-opus-4-6");
+    expect(skip).toBe("model locked");
+    expect(getUsageForProvider).not.toHaveBeenCalled();
   });
 });

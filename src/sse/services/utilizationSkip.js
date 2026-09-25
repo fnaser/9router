@@ -157,6 +157,9 @@ async function getUsage(connection) {
  * model-locked, or the provider just connect-timed-out (in-process circuit).
  * Warm path: if every account already has cache/last-good quotas, decide without
  * awaiting provider usage HTTP — refresh stale rows in the background.
+ *
+ * @returns {Promise<false|string>} false = try the model; otherwise a short
+ *   reason string for logs ("provider circuit" | "model locked" | "utilization cap").
  */
 export async function shouldSkipComboModel(modelStr) {
   const parsed = parseModel(modelStr);
@@ -165,7 +168,7 @@ export async function shouldSkipComboModel(modelStr) {
 
   // Parallel turns: after one connect timeout, skip this provider for ~20s so
   // siblings do not each burn FETCH_CONNECT_TIMEOUT_MS on the same hung peer.
-  if (isProviderTripped(provider)) return true;
+  if (isProviderTripped(provider)) return "provider circuit";
 
   let connections;
   try {
@@ -176,25 +179,26 @@ export async function shouldSkipComboModel(modelStr) {
   if (!Array.isArray(connections) || connections.length === 0) return false;
 
   const model = parsed.model;
-  if (connections.every((c) => isModelLockActive(c, model))) return true;
+  if (connections.every((c) => isModelLockActive(c, model))) return "model locked";
 
   const snapshots = [];
   const refresh = [];
   for (const connection of connections) {
     const { usage, needsRefresh } = peekUsage(connection);
     if (!usage?.quotas) {
-      return evaluateComboModelSkip(modelStr, {
+      const skip = await evaluateComboModelSkip(modelStr, {
         parseModel,
         getConnections: async () => connections,
         getUsage,
       });
+      return skip ? "utilization cap" : false;
     }
     snapshots.push(usage.quotas);
     if (needsRefresh) refresh.push(connection);
   }
 
   for (const connection of refresh) kickBackgroundRefresh(connection);
-  return shouldSkipModelForUtilization(snapshots, parsed.model);
+  return shouldSkipModelForUtilization(snapshots, parsed.model) ? "utilization cap" : false;
 }
 
 /** Test helpers */
