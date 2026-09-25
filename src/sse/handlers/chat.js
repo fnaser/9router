@@ -348,10 +348,17 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       log.warn("FALLBACK", `⇄ ACC:${credentials.connectionName} UNAVAILABLE (${result.status}) → NEXT ACCOUNT`);
       excludeConnectionIds.add(credentials.connectionId);
       lastError = result.error;
-      lastStatus = pickPreferredFailureStatus(lastStatus, result.status);
-      if (checkFallbackError(result.status, result.error).terminal) {
+      const nextStatus = pickPreferredFailureStatus(lastStatus, result.status);
+      lastStatus = nextStatus;
+      // Only sticky-capture a terminal response when it matches the preferred status
+      // (so a later terminal 429 does not overwrite an earlier 402 body).
+      if (
+        checkFallbackError(result.status, result.error).terminal
+        && result.response
+        && nextStatus === result.status
+      ) {
+        terminalResponse = result.response;
         terminalError = result.error;
-        if (result.response) terminalResponse = result.response;
       }
       continue;
     }
