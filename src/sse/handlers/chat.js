@@ -29,7 +29,8 @@ import { tripProvider, clearProviderTrip } from "../services/providerCircuit.js"
 
 /**
  * Route a named combo (or fusion) through the shared combo handlers.
- * Used from handleChat after getComboModels resolves.
+ * Used from handleChat, and from handleSingleModelChat when a combo leg is
+ * itself another combo name (nested combo).
  */
 function routeComboChat({
   body,
@@ -202,8 +203,23 @@ export async function handleChat(request, clientRawRequest = null) {
 async function handleSingleModelChat(body, modelStr, clientRawRequest = null, request = null, apiKey = null, settings = null) {
   const modelInfo = await getModelInfo(modelStr);
 
-  // Combos are resolved in handleChat before this runs. Legs are always provider/model.
+  // Nested combo leg: a combo's models[] entry can be another combo name
+  // (no slash). Expand via routeComboChat. Normal provider/model legs skip this.
   if (!modelInfo.provider) {
+    const comboModels = await getComboModels(modelStr);
+    if (comboModels) {
+      const chatSettings = settings || await getSettings();
+      return routeComboChat({
+        body,
+        modelStr,
+        comboModels,
+        settings: chatSettings,
+        clientRawRequest,
+        request,
+        apiKey,
+        requiredCapabilities: detectRequiredCapabilities(body),
+      });
+    }
     log.warn("CHAT", "Invalid model format", { model: modelStr });
     return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid model format");
   }
