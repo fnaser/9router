@@ -4,12 +4,12 @@
  * the same hung peer before model locks land in SQLite.
  */
 
+import { CONNECT_TIMEOUT_SOFT_COOL_MS } from "open-sse/config/errorConfig.js";
+
 const trippedUntil = new Map(); // provider -> epoch ms
 
-const DEFAULT_TRIP_MS = 20_000;
-
 /** Mark provider hot after a connect timeout (or similar hard fail). */
-export function tripProvider(provider, ms = DEFAULT_TRIP_MS) {
+export function tripProvider(provider, ms = CONNECT_TIMEOUT_SOFT_COOL_MS) {
   if (!provider) return;
   const until = Date.now() + Math.max(1_000, ms);
   const prev = trippedUntil.get(provider) || 0;

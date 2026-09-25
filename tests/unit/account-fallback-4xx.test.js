@@ -4,7 +4,11 @@
 // the first error. A 400 "maximum context length" from one session therefore
 // looked like the same failure in unrelated sessions.
 import { describe, expect, it } from "vitest";
-import { checkFallbackError, pickPreferredFailureStatus } from "../../open-sse/services/accountFallback.js";
+import {
+  checkFallbackError,
+  pickPreferredFailureStatus,
+} from "../../open-sse/services/accountFallback.js";
+import { CONNECT_TIMEOUT_SOFT_COOL_MS } from "../../open-sse/config/errorConfig.js";
 
 describe("checkFallbackError — request-scoped vs account-scoped failures", () => {
   it("does not cool the account down for a 400 caused by the request", () => {
@@ -39,7 +43,11 @@ describe("checkFallbackError — request-scoped vs account-scoped failures", () 
 
   it("falls through synthetic connect-timeout 502 with a short soft cool", () => {
     const result = checkFallbackError(502, "[502]: fetch connect timeout");
-    expect(result).toEqual({ shouldFallback: true, cooldownMs: 20_000, terminal: false });
+    expect(result).toEqual({
+      shouldFallback: true,
+      cooldownMs: CONNECT_TIMEOUT_SOFT_COOL_MS,
+      terminal: false,
+    });
   });
 
   it("keeps the transient cooldown for unmatched server errors", () => {

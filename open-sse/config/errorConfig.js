@@ -41,6 +41,10 @@ export const TRANSIENT_COOLDOWN_MS = 30 * 1000;
 // Hard cap for provider-reported rate limit cooldown (e.g. codex resets_at can be 5-6h)
 export const MAX_RATE_LIMIT_COOLDOWN_MS = 30 * 60 * 1000;
 
+// Soft cool + in-process circuit after a synthetic headers/TTFT timeout
+// ("fetch connect timeout"). Keep lock and circuit aligned.
+export const CONNECT_TIMEOUT_SOFT_COOL_MS = 20 * 1000;
+
 // Cooldown durations (ms)
 const COOLDOWN = {
   long: 2 * 60 * 1000,
@@ -85,10 +89,10 @@ export const ERROR_RULES = [
 
   // Synthetic connect-timeout 502s from BaseExecutor. One attempt only (no 502
   // retry ladder). Dual defense for parallel turns:
-  //   1) cooldownMs 20s → brief modelLock_* so account selection skips the peer
-  //   2) providerCircuit (~20s) → combo shouldSkipComboModel skips the provider
+  //   1) cooldownMs → brief modelLock_* so account selection skips the peer
+  //   2) providerCircuit (same duration) → combo shouldSkipComboModel skips the provider
   // A long lock (30s+) used to cascade under parallel Claude Code sessions.
-  { text: "fetch connect timeout", cooldownMs: 20 * 1000 },
+  { text: "fetch connect timeout", cooldownMs: CONNECT_TIMEOUT_SOFT_COOL_MS },
 
   { text: "rate limit",               backoff: true },
   { text: "too many requests",        backoff: true },

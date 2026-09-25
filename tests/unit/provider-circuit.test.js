@@ -7,6 +7,7 @@ import {
   _resetProviderCircuitForTests,
   _tripUntilForTests,
 } from "../../src/sse/services/providerCircuit.js";
+import { CONNECT_TIMEOUT_SOFT_COOL_MS } from "../../open-sse/config/errorConfig.js";
 
 describe("providerCircuit", () => {
   beforeEach(() => {
@@ -23,7 +24,7 @@ describe("providerCircuit", () => {
     expect(isProviderTripped("claude")).toBe(false);
     tripProvider("claude");
     expect(isProviderTripped("claude")).toBe(true);
-    expect(_tripUntilForTests("claude")).toBeGreaterThan(Date.now());
+    expect(_tripUntilForTests("claude")).toBe(Date.now() + CONNECT_TIMEOUT_SOFT_COOL_MS);
   });
 
   it("expires after the trip window", () => {
@@ -42,7 +43,7 @@ describe("providerCircuit", () => {
   it("extends an existing trip when a later failure arrives", () => {
     tripProvider("claude", 5_000);
     const first = _tripUntilForTests("claude");
-    tripProvider("claude", 20_000);
+    tripProvider("claude", CONNECT_TIMEOUT_SOFT_COOL_MS);
     expect(_tripUntilForTests("claude")).toBeGreaterThan(first);
   });
 
