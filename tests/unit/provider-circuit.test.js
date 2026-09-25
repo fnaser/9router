@@ -73,4 +73,10 @@ describe("providerCircuit (per-connection)", () => {
       retryAfterMs: 0,
     });
   });
+
+  it("ignores the synthetic noauth connection id", () => {
+    tripConnection("noauth", 10_000);
+    expect(getConnectionTripRemainingMs("noauth")).toBe(0);
+    clearConnectionTrip("noauth"); // no-op, must not throw
+  });
 });

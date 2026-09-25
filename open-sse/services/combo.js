@@ -771,8 +771,11 @@ function collectPanel(calls, { minPanel, stragglerGraceMs, panelHardTimeoutMs })
 }
 
 async function dropCappedModels(models, shouldSkipModel, log) {
-  if (typeof shouldSkipModel !== "function") return models;
+  if (typeof shouldSkipModel !== "function") {
+    return { kept: models, earliestRetryAfter: null };
+  }
   const kept = [];
+  let earliestRetryAfter = null;
   for (const model of models) {
     let skip = false;
     try {
@@ -782,12 +785,21 @@ async function dropCappedModels(models, shouldSkipModel, log) {
     }
     if (skip) {
       const reason = typeof skip === "string" ? skip : (skip.reason || "utilization cap");
+      const retryMs = typeof skip === "object" && Number(skip.retryAfterMs) > 0
+        ? Number(skip.retryAfterMs)
+        : 0;
+      if (retryMs > 0) {
+        const until = new Date(Date.now() + retryMs).toISOString();
+        if (!earliestRetryAfter || new Date(until) < new Date(earliestRetryAfter)) {
+          earliestRetryAfter = until;
+        }
+      }
       log.info("FUSION", `Model ${model} skipped (${reason}), leaving it out`);
     } else {
       kept.push(model);
     }
   }
-  return kept;
+  return { kept, earliestRetryAfter };
 }
 
 /**
@@ -823,11 +835,15 @@ export async function handleFusionChat({ body, models, handleSingleModel, log, c
     );
   }
 
-  const panel = await dropCappedModels(requested, shouldSkipModel, log);
+  const { kept: panel, earliestRetryAfter } = await dropCappedModels(requested, shouldSkipModel, log);
   if (panel.length === 0) {
     log.info("FUSION", "Every panel model was skipped (circuit, lock, or utilization)");
+    const msg = "All fusion panel models unavailable";
+    if (earliestRetryAfter) {
+      return unavailableResponse(503, msg, earliestRetryAfter, formatRetryAfter(earliestRetryAfter));
+    }
     return new Response(
-      JSON.stringify({ error: { message: "All fusion panel models unavailable" } }),
+      JSON.stringify({ error: { message: msg } }),
       { status: 503, headers: { "Content-Type": "application/json" } }
     );
   }

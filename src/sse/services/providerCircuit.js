@@ -14,7 +14,7 @@ const trippedUntil = new Map(); // connectionId -> epoch ms
 
 /** Mark a connection hot after a connect timeout (or similar hard fail). */
 export function tripConnection(connectionId, ms = CONNECT_TIMEOUT_SOFT_COOL_MS) {
-  if (!connectionId) return;
+  if (!connectionId || connectionId === "noauth") return;
   const until = Date.now() + Math.max(1_000, ms);
   const prev = trippedUntil.get(connectionId) || 0;
   if (until > prev) trippedUntil.set(connectionId, until);
@@ -34,7 +34,7 @@ export function getConnectionTripRemainingMs(connectionId) {
 }
 
 export function clearConnectionTrip(connectionId) {
-  if (connectionId) trippedUntil.delete(connectionId);
+  if (connectionId && connectionId !== "noauth") trippedUntil.delete(connectionId);
 }
 
 /**

@@ -67,14 +67,14 @@ describe("utilizationSkip warm path", () => {
     expect(getUsageForProvider).toHaveBeenCalled();
   });
 
-  it("reports provider circuit when every active connection is tripped", async () => {
+  it("reports connection circuit when every active connection is tripped", async () => {
     const { tripConnection, _resetProviderCircuitForTests } = await import("../../src/sse/services/providerCircuit.js");
     _resetProviderCircuitForTests();
     tripConnection("a1", 60_000);
     getProviderConnections.mockResolvedValue([{ id: "a1", provider: "claude", isActive: true }]);
 
     const skip = await shouldSkipComboModel("cc/claude-opus-4-6");
-    expect(skip).toEqual({ reason: "provider circuit", retryAfterMs: expect.any(Number) });
+    expect(skip).toEqual({ reason: "connection circuit", retryAfterMs: expect.any(Number) });
     expect(skip.retryAfterMs).toBeGreaterThan(50_000);
     expect(getUsageForProvider).not.toHaveBeenCalled();
     _resetProviderCircuitForTests();

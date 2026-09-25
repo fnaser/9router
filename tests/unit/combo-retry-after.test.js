@@ -54,11 +54,11 @@ describe("combo Retry-After", () => {
     expect(calls).toEqual(["gcli/a", "cc/b"]);
   });
 
-  it("advertises Retry-After when every model is skipped for provider circuit", async () => {
+  it("advertises Retry-After when every model is skipped for connection circuit", async () => {
     const res = await handleComboChat({
       body: { messages: [] },
       models: ["cc/a", "cx/b"],
-      shouldSkipModel: async () => ({ reason: "provider circuit", retryAfterMs: 18_000 }),
+      shouldSkipModel: async () => ({ reason: "connection circuit", retryAfterMs: 18_000 }),
       handleSingleModel: async () => failing(500),
       log,
       autoSwitch: false,
@@ -68,6 +68,23 @@ describe("combo Retry-After", () => {
     expect(header).toBeGreaterThan(10);
     expect(header).toBeLessThanOrEqual(18);
     const body = await res.json();
-    expect(body.error.message).toMatch(/provider circuit/);
+    expect(body.error.message).toMatch(/connection circuit/);
+  });
+});
+
+describe("fusion Retry-After", () => {
+  it("advertises Retry-After when every panel model is skipped for connection circuit", async () => {
+    const { handleFusionChat } = await import("../../open-sse/services/combo.js");
+    const res = await handleFusionChat({
+      body: { messages: [{ role: "user", content: "hi" }] },
+      models: ["cc/a", "cx/b"],
+      shouldSkipModel: async () => ({ reason: "connection circuit", retryAfterMs: 12_000 }),
+      handleSingleModel: async () => failing(500),
+      log,
+    });
+    expect(res.status).toBe(503);
+    const header = Number(res.headers.get("Retry-After"));
+    expect(header).toBeGreaterThan(5);
+    expect(header).toBeLessThanOrEqual(12);
   });
 });

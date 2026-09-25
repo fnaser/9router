@@ -161,7 +161,7 @@ async function getUsage(connection) {
  *
  * @returns {Promise<false|string|{reason:string,retryAfterMs?:number}>} false = try
  *   the model; a string is the skip reason; an object may also carry retryAfterMs
- *   (used for provider circuit so combo can advertise Retry-After).
+ *   (used for connection circuit so combo can advertise Retry-After).
  */
 export async function shouldSkipComboModel(modelStr) {
   const parsed = parseModel(modelStr);
@@ -180,7 +180,7 @@ export async function shouldSkipComboModel(modelStr) {
   // connection is tripped — a healthy sibling account can still be tried.
   const { allTripped, retryAfterMs } = getAllConnectionsTrip(connections.map((c) => c.id));
   if (allTripped) {
-    return { reason: "provider circuit", retryAfterMs };
+    return { reason: "connection circuit", retryAfterMs };
   }
 
   const model = parsed.model;
