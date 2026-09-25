@@ -436,7 +436,7 @@ export function getComboModelsFromData(modelStr, combosData) {
  * @param {string} [options.comboName] - Name of the combo (for round-robin tracking)
  * @param {string} [options.comboStrategy] - Strategy: "fallback" or "round-robin"
  * @param {number|string} [options.comboStickyLimit=1] - Requests per combo model before switching
- * @param {Function} [options.shouldSkipModel] - (modelStr) => Promise<boolean>. True skips before the upstream call.
+ * @param {Function} [options.shouldSkipModel] - (modelStr) => Promise<boolean|string>. Truthy skips before the upstream call; a string is logged as the reason.
  * @param {Set<string>|null} [options.requiredCapabilities] - Precomputed capability set from the outer handler (avoids a second body scan).
  * @returns {Promise<Response>} After a full fallthrough, tries one more pass from the top (no sleep) before returning the all-failed response.
  */
@@ -505,9 +505,10 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
           log.warn("COMBO", `Utilization check failed for ${modelStr}`, { error: error?.message || String(error) });
         }
         if (skip) {
-          log.info("COMBO", `Model ${modelStr} at its utilization cap, trying next`);
+          const reason = typeof skip === "string" ? skip : "utilization cap";
+          log.info("COMBO", `Model ${modelStr} skipped (${reason}), trying next`);
           if (!lastError) {
-            lastError = "utilization cap reached";
+            lastError = reason;
             lastStatus = 503;
           }
           continue;
@@ -760,8 +761,12 @@ async function dropCappedModels(models, shouldSkipModel, log) {
     } catch (error) {
       log.warn("FUSION", `Utilization check failed for ${model}`, { error: error?.message || String(error) });
     }
-    if (skip) log.info("FUSION", `Model ${model} at its utilization cap, leaving it out`);
-    else kept.push(model);
+    if (skip) {
+      const reason = typeof skip === "string" ? skip : "utilization cap";
+      log.info("FUSION", `Model ${model} skipped (${reason}), leaving it out`);
+    } else {
+      kept.push(model);
+    }
   }
   return kept;
 }
@@ -787,7 +792,7 @@ async function dropCappedModels(models, shouldSkipModel, log) {
  * @param {string} [options.comboName] - Combo name (logging)
  * @param {string} [options.judgeModel] - Judge model; falls back to panel[0]
  * @param {Object} [options.tuning] - Override FUSION_DEFAULTS (minPanel, grace, timeout)
- * @param {Function} [options.shouldSkipModel] - (modelStr) => Promise<boolean>. True leaves the model out of the panel.
+ * @param {Function} [options.shouldSkipModel] - (modelStr) => Promise<boolean|string>. Truthy leaves the model out of the panel; a string is logged as the reason.
  * @returns {Promise<Response>}
  */
 export async function handleFusionChat({ body, models, handleSingleModel, log, comboName, judgeModel, tuning, shouldSkipModel = null }) {
@@ -801,9 +806,9 @@ export async function handleFusionChat({ body, models, handleSingleModel, log, c
 
   const panel = await dropCappedModels(requested, shouldSkipModel, log);
   if (panel.length === 0) {
-    log.info("FUSION", "Every panel model is at its utilization cap");
+    log.info("FUSION", "Every panel model was skipped (circuit, lock, or utilization)");
     return new Response(
-      JSON.stringify({ error: { message: "utilization cap reached" } }),
+      JSON.stringify({ error: { message: "All fusion panel models unavailable" } }),
       { status: 503, headers: { "Content-Type": "application/json" } }
     );
   }
@@ -824,7 +829,8 @@ export async function handleFusionChat({ body, models, handleSingleModel, log, c
       log.warn("FUSION", `Utilization check failed for judge ${judge}`, { error: error?.message || String(error) });
     }
     if (judgeSkipped) {
-      log.info("FUSION", `Judge ${judge} at its utilization cap, using ${panel[0]}`);
+      const reason = typeof judgeSkipped === "string" ? judgeSkipped : "utilization cap";
+      log.info("FUSION", `Judge ${judge} skipped (${reason}), using ${panel[0]}`);
       judge = panel[0];
     }
   }
