@@ -96,7 +96,7 @@ describe("utilizationSkip warm path", () => {
     _resetProviderCircuitForTests();
   });
 
-  it("reports model locked when every account has an active lock", async () => {
+  it("reports model locked with Retry-After when every account has an active lock", async () => {
     const until = new Date(Date.now() + 60_000).toISOString();
     getProviderConnections.mockResolvedValue([{
       id: "a1",
@@ -106,7 +106,31 @@ describe("utilizationSkip warm path", () => {
     }]);
 
     const skip = await shouldSkipComboModel("cc/claude-opus-4-6");
-    expect(skip).toBe("model locked");
+    expect(skip).toEqual({ reason: "model locked", retryAfterMs: expect.any(Number) });
+    expect(skip.retryAfterMs).toBeGreaterThan(50_000);
+    expect(skip.retryAfterMs).toBeLessThanOrEqual(60_000);
     expect(getUsageForProvider).not.toHaveBeenCalled();
+  });
+
+  it("uses the earliest lock among accounts for Retry-After", async () => {
+    getProviderConnections.mockResolvedValue([
+      {
+        id: "a1",
+        provider: "claude",
+        isActive: true,
+        "modelLock_claude-opus-4-6": new Date(Date.now() + 40_000).toISOString(),
+      },
+      {
+        id: "a2",
+        provider: "claude",
+        isActive: true,
+        "modelLock_claude-opus-4-6": new Date(Date.now() + 15_000).toISOString(),
+      },
+    ]);
+
+    const skip = await shouldSkipComboModel("cc/claude-opus-4-6");
+    expect(skip.reason).toBe("model locked");
+    expect(skip.retryAfterMs).toBeGreaterThan(10_000);
+    expect(skip.retryAfterMs).toBeLessThanOrEqual(15_000);
   });
 });

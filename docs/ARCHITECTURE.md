@@ -556,7 +556,8 @@ abort, not TCP) match `ERROR_RULES` with `CONNECT_TIMEOUT_SOFT_COOL_MS` (20s):
 `markAccountUnavailable` writes a brief `modelLock_*`, and `chat.js` trips the
 same connection in the in-process circuit. Combo `shouldSkipComboModel` skips
 the provider only when every active connection is tripped (and advertises
-`Retry-After`). Claude’s executor waits 60s for headers; other DefaultExecutor
+`Retry-After`). Model-lock skips use the same `Retry-After` path (earliest
+remaining lock). Claude’s executor waits 60s for headers; other DefaultExecutor
 providers keep the global 15s.
 
 ### Cursor usage and session probe

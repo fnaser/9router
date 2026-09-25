@@ -3,7 +3,7 @@
 Fork-only changes on top of upstream v0.5.86. See [FORK.md](./FORK.md).
 
 ## Fixes
-- **Combo / Claude:** strip Claude Code `safeguards` so “Extra inputs are not permitted” can fall through; connect-timeout 502s skip the 502 retry ladder (was ~249s), use a 60s Claude headers wait + 20s soft cool + **per-connection** circuit (combo skips only when every account is tripped); skip wrap when pass 1 only skipped; combo no longer sleeps before the next model on transient 5xx
+- **Combo / Claude:** strip Claude Code `safeguards` so “Extra inputs are not permitted” can fall through; connect-timeout 502s skip the 502 retry ladder (was ~249s), use a 60s Claude headers wait + 20s soft cool + **per-connection** circuit (combo skips only when every account is tripped); skip wrap when pass 1 only skipped; model-lock skips advertise `Retry-After`; combo no longer sleeps before the next model on transient 5xx
 - **Docs:** ARCHITECTURE.md connect-timeout section matches soft cool + per-connection circuit (was stale `cooldownMs: 0`); skip reason renamed to `connection circuit`; fusion empty-panel advertises circuit `Retry-After`; `noauth` is not tripable
 - **Combo / empty stream:** HTTP 200 SSE that closes with only keepalives / zero usable frames falls through to the next combo model (upstream #3463 / PR #3560)
 - **Utilization gate:** map Claude Team `extra_usage` to `On-demand`; when weekly/session is full but extra is under 25%, keep the account eligible
