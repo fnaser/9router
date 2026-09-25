@@ -36,7 +36,7 @@ describe("combo wrap-once after full fallthrough", () => {
     expect(calls).toEqual(["cc/a", "cx/b", "cc/a"]);
   });
 
-  it("stops after the second pass when everything still fails", async () => {
+  it("skips the wrap entirely when every model failed with terminal billing", async () => {
     const calls = [];
     const res = await handleComboChat({
       body: { messages: [] },
@@ -49,7 +49,26 @@ describe("combo wrap-once after full fallthrough", () => {
       autoSwitch: false,
     });
     expect(res.status).toBe(402);
-    expect(calls).toEqual(["cc/a", "cx/b", "cc/a", "cx/b"]);
+    expect(calls).toEqual(["cc/a", "cx/b"]);
+  });
+
+  it("does not re-hit a terminal billing model on the wrap pass", async () => {
+    const calls = [];
+    const res = await handleComboChat({
+      body: { messages: [] },
+      models: ["cc/a", "xai/b"],
+      handleSingleModel: async (_body, model) => {
+        calls.push(model);
+        if (model === "cc/a") return failing(429);
+        return failing(402, "spending-limit");
+      },
+      log,
+      autoSwitch: false,
+    });
+    expect(res.status).toBe(402);
+    // Pass 1: a 429, b 402. Pass 2: retry a only (b terminal). Status stays 402
+    // (wrap-pass failures do not rewrite lastStatus; billing wins over 429).
+    expect(calls).toEqual(["cc/a", "xai/b", "cc/a"]);
   });
 
   it("honors shouldSkipModel on the wrap pass", async () => {
@@ -74,5 +93,17 @@ describe("combo wrap-once after full fallthrough", () => {
     expect(res.status).toBe(200);
     // Pass 1: skip a, try b (fail). Pass 2: try a (ok) — b never needed.
     expect(calls).toEqual(["cx/b", "cc/a"]);
+  });
+
+  it("surfaces the latest upstream status, not a prior util-skip 503", async () => {
+    const res = await handleComboChat({
+      body: { messages: [] },
+      models: ["cc/a", "xai/b"],
+      shouldSkipModel: async (model) => model === "cc/a",
+      handleSingleModel: async () => failing(402, "out of credits"),
+      log,
+      autoSwitch: false,
+    });
+    expect(res.status).toBe(402);
   });
 });
