@@ -84,7 +84,8 @@ describe("combo failover on empty-but-successful streams (#3463)", () => {
       "p2/second": () => sseResponse([]),
     });
 
-    expect(attempted).toEqual(["p1/first", "p2/second"]);
+    // Full fallthrough wraps once from the top before giving up.
+    expect(attempted).toEqual(["p1/first", "p2/second", "p1/first", "p2/second"]);
     expect(response.status).toBe(503);
   });
 
