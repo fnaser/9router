@@ -269,7 +269,7 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
   // Fallthrough-only when cooldownMs is 0 (e.g. Extra inputs 400): try the next
   // combo model / account without writing a model lock. Connect-timeout uses a
   // short soft cool (see ERROR_RULES) so it DOES write a brief modelLock_*, and
-  // chat.js also trips the in-process providerCircuit for parallel siblings.
+  // chat.js also trips the per-connection circuit for parallel siblings.
   if (!(cooldownMs > 0)) {
     return { shouldFallback: true, cooldownMs: 0 };
   }

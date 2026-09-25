@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
+  tripConnection,
+  clearConnectionTrip,
+  getConnectionTripRemainingMs,
+  getAllConnectionsTrip,
   tripProvider,
   isProviderTripped,
   clearProviderTrip,
@@ -9,7 +13,7 @@ import {
 } from "../../src/sse/services/providerCircuit.js";
 import { CONNECT_TIMEOUT_SOFT_COOL_MS } from "../../open-sse/config/errorConfig.js";
 
-describe("providerCircuit", () => {
+describe("providerCircuit (per-connection)", () => {
   beforeEach(() => {
     _resetProviderCircuitForTests();
     vi.useFakeTimers();
@@ -20,38 +24,58 @@ describe("providerCircuit", () => {
     vi.useRealTimers();
   });
 
-  it("trips a provider for the default window", () => {
-    expect(isProviderTripped("claude")).toBe(false);
-    tripProvider("claude");
-    expect(isProviderTripped("claude")).toBe(true);
-    expect(_tripUntilForTests("claude")).toBe(Date.now() + CONNECT_TIMEOUT_SOFT_COOL_MS);
+  it("trips a connection for the default window", () => {
+    expect(getConnectionTripRemainingMs("conn-a")).toBe(0);
+    tripConnection("conn-a");
+    expect(getConnectionTripRemainingMs("conn-a")).toBeGreaterThan(0);
+    expect(_tripUntilForTests("conn-a")).toBe(Date.now() + CONNECT_TIMEOUT_SOFT_COOL_MS);
   });
 
   it("expires after the trip window", () => {
-    tripProvider("codex", 5_000);
-    expect(isProviderTripped("codex")).toBe(true);
+    tripConnection("conn-b", 5_000);
+    expect(getConnectionTripRemainingMs("conn-b")).toBeGreaterThan(0);
     vi.advanceTimersByTime(5_001);
-    expect(isProviderTripped("codex")).toBe(false);
+    expect(getConnectionTripRemainingMs("conn-b")).toBe(0);
   });
 
-  it("clearProviderTrip removes the trip early", () => {
-    tripProvider("xai", 60_000);
-    clearProviderTrip("xai");
-    expect(isProviderTripped("xai")).toBe(false);
+  it("clearConnectionTrip removes the trip early", () => {
+    tripConnection("conn-c", 60_000);
+    clearConnectionTrip("conn-c");
+    expect(getConnectionTripRemainingMs("conn-c")).toBe(0);
   });
 
   it("extends an existing trip when a later failure arrives", () => {
-    tripProvider("claude", 5_000);
-    const first = _tripUntilForTests("claude");
-    tripProvider("claude", CONNECT_TIMEOUT_SOFT_COOL_MS);
-    expect(_tripUntilForTests("claude")).toBeGreaterThan(first);
+    tripConnection("conn-d", 5_000);
+    const first = _tripUntilForTests("conn-d");
+    tripConnection("conn-d", CONNECT_TIMEOUT_SOFT_COOL_MS);
+    expect(_tripUntilForTests("conn-d")).toBeGreaterThan(first);
   });
 
-  it("reports remaining trip milliseconds", () => {
-    tripProvider("claude", 10_000);
-    expect(getProviderTripRemainingMs("claude")).toBeGreaterThan(9_000);
-    expect(getProviderTripRemainingMs("claude")).toBeLessThanOrEqual(10_000);
-    vi.advanceTimersByTime(10_001);
-    expect(getProviderTripRemainingMs("claude")).toBe(0);
+  it("getAllConnectionsTrip is false when any sibling is healthy", () => {
+    tripConnection("a", 10_000);
+    expect(getAllConnectionsTrip(["a", "b"])).toEqual({ allTripped: false, retryAfterMs: 0 });
+  });
+
+  it("getAllConnectionsTrip is true when every connection is tripped", () => {
+    tripConnection("a", 10_000);
+    tripConnection("b", 8_000);
+    const { allTripped, retryAfterMs } = getAllConnectionsTrip(["a", "b"]);
+    expect(allTripped).toBe(true);
+    expect(retryAfterMs).toBeGreaterThan(7_000);
+    expect(retryAfterMs).toBeLessThanOrEqual(8_000);
+  });
+
+  it("getAllConnectionsTrip is false for an empty id list", () => {
+    expect(getAllConnectionsTrip([])).toEqual({ allTripped: false, retryAfterMs: 0 });
+  });
+
+  // Deprecated provider-keyed aliases still work (keyed by whatever string is passed).
+  it("deprecated tripProvider aliases still trip by key", () => {
+    expect(isProviderTripped("claude")).toBe(false);
+    tripProvider("claude");
+    expect(isProviderTripped("claude")).toBe(true);
+    expect(getProviderTripRemainingMs("claude")).toBeGreaterThan(0);
+    clearProviderTrip("claude");
+    expect(isProviderTripped("claude")).toBe(false);
   });
 });

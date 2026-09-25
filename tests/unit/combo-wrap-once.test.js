@@ -95,6 +95,27 @@ describe("combo wrap-once after full fallthrough", () => {
     expect(calls).toEqual(["cx/b", "cc/a"]);
   });
 
+  it("skips the wrap when every model was only skipped on pass 1", async () => {
+    const calls = [];
+    const res = await handleComboChat({
+      body: { messages: [] },
+      models: ["cc/a", "cx/b"],
+      shouldSkipModel: async () => "utilization cap",
+      handleSingleModel: async (_body, model) => {
+        calls.push(model);
+        return failing(503);
+      },
+      log,
+      autoSwitch: false,
+    });
+    expect(res.status).toBe(503);
+    expect(calls).toEqual([]);
+    expect(log.info).toHaveBeenCalledWith(
+      "COMBO",
+      "Skipping wrap: first pass only skipped models",
+    );
+  });
+
   it("surfaces the latest upstream status, not a prior util-skip 503", async () => {
     const res = await handleComboChat({
       body: { messages: [] },
