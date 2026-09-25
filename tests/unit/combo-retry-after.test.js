@@ -70,6 +70,23 @@ describe("combo Retry-After", () => {
     const body = await res.json();
     expect(body.error.message).toMatch(/connection circuit/);
   });
+
+  it("advertises Retry-After when every model is skipped for model locked", async () => {
+    const res = await handleComboChat({
+      body: { messages: [] },
+      models: ["cc/a", "cx/b"],
+      shouldSkipModel: async () => ({ reason: "model locked", retryAfterMs: 20_000 }),
+      handleSingleModel: async () => failing(500),
+      log,
+      autoSwitch: false,
+    });
+    expect(res.status).toBe(503);
+    const header = Number(res.headers.get("Retry-After"));
+    expect(header).toBeGreaterThan(15);
+    expect(header).toBeLessThanOrEqual(20);
+    const body = await res.json();
+    expect(body.error.message).toMatch(/model locked/);
+  });
 });
 
 describe("fusion Retry-After", () => {

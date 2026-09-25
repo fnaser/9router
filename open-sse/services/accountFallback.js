@@ -154,6 +154,16 @@ export function isModelLockActive(connection, model) {
   return new Date(expiry).getTime() > Date.now();
 }
 
+/** Milliseconds left on the model (or __all) lock, or 0 if not locked / expired. */
+export function getModelLockRemainingMs(connection, model) {
+  if (!connection) return 0;
+  const key = getModelLockKey(model);
+  const expiry = connection[key] || connection[MODEL_LOCK_ALL];
+  if (!expiry) return 0;
+  const rem = new Date(expiry).getTime() - Date.now();
+  return rem > 0 ? rem : 0;
+}
+
 /**
  * Get earliest active model lock expiry across all modelLock_* fields.
  * Used for UI cooldown display.

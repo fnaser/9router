@@ -4,7 +4,7 @@ import {
   evaluateComboModelSkip,
   shouldSkipModelForUtilization,
 } from "open-sse/services/utilizationGate.js";
-import { isModelLockActive } from "open-sse/services/accountFallback.js";
+import { isModelLockActive, getModelLockRemainingMs } from "open-sse/services/accountFallback.js";
 import { getProviderConnections } from "@/lib/localDb";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { checkAndRefreshToken } from "./tokenRefresh.js";
@@ -184,7 +184,17 @@ export async function shouldSkipComboModel(modelStr) {
   }
 
   const model = parsed.model;
-  if (connections.every((c) => isModelLockActive(c, model))) return "model locked";
+  if (connections.every((c) => isModelLockActive(c, model))) {
+    let minRem = Infinity;
+    for (const c of connections) {
+      const rem = getModelLockRemainingMs(c, model);
+      if (rem > 0 && rem < minRem) minRem = rem;
+    }
+    return {
+      reason: "model locked",
+      retryAfterMs: minRem === Infinity ? 0 : minRem,
+    };
+  }
 
   const snapshots = [];
   const refresh = [];
