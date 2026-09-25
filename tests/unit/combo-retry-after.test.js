@@ -53,4 +53,21 @@ describe("combo Retry-After", () => {
     expect(res.status).toBe(200);
     expect(calls).toEqual(["gcli/a", "cc/b"]);
   });
+
+  it("advertises Retry-After when every model is skipped for provider circuit", async () => {
+    const res = await handleComboChat({
+      body: { messages: [] },
+      models: ["cc/a", "cx/b"],
+      shouldSkipModel: async () => ({ reason: "provider circuit", retryAfterMs: 18_000 }),
+      handleSingleModel: async () => failing(500),
+      log,
+      autoSwitch: false,
+    });
+    expect(res.status).toBe(503);
+    const header = Number(res.headers.get("Retry-After"));
+    expect(header).toBeGreaterThan(10);
+    expect(header).toBeLessThanOrEqual(18);
+    const body = await res.json();
+    expect(body.error.message).toMatch(/provider circuit/);
+  });
 });

@@ -1,6 +1,6 @@
 /**
  * In-process circuit for providers that just connect-timed-out.
- * Stops parallel combo turns from each burning FETCH_CONNECT_TIMEOUT_MS on
+ * Stops parallel combo turns from each burning the headers/TTFT wait on
  * the same hung peer before model locks land in SQLite.
  */
 
@@ -18,14 +18,20 @@ export function tripProvider(provider, ms = DEFAULT_TRIP_MS) {
 
 /** True while the provider should be skipped by combo pre-checks. */
 export function isProviderTripped(provider) {
-  if (!provider) return false;
+  return getProviderTripRemainingMs(provider) > 0;
+}
+
+/** Milliseconds left on the trip, or 0 if not tripped / expired. */
+export function getProviderTripRemainingMs(provider) {
+  if (!provider) return 0;
   const until = trippedUntil.get(provider);
-  if (!until) return false;
-  if (Date.now() >= until) {
+  if (!until) return 0;
+  const rem = until - Date.now();
+  if (rem <= 0) {
     trippedUntil.delete(provider);
-    return false;
+    return 0;
   }
-  return true;
+  return rem;
 }
 
 export function clearProviderTrip(provider) {

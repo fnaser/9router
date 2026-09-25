@@ -40,6 +40,9 @@ export default {
     quirks: {
       cloakToolsOnOAuth: true,
     },
+    // Headers/TTFT wait (not TCP). Large Opus + cache often needs 12–45s before
+    // the first byte; the global 15s default was aborting healthy streams.
+    timeoutMs: 60_000,
     auth: {
       apiKey: {
         header: "x-api-key",
