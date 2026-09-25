@@ -230,6 +230,9 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
   // Extract userAgent from request
   const userAgent = request?.headers?.get("user-agent") || "";
 
+  // Prefer settings loaded in handleChat; one load for the whole account loop.
+  const chatSettings = settings || await getSettings();
+
   // Try with available accounts (fallback on errors)
   const excludeConnectionIds = new Set();
   let lastError = null;
@@ -239,7 +242,9 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
   let terminalError = null;
 
   while (true) {
-    const credentials = await getProviderCredentials(provider, excludeConnectionIds, model);
+    const credentials = await getProviderCredentials(provider, excludeConnectionIds, model, {
+      settings: chatSettings,
+    });
 
     // All accounts unavailable
     if (!credentials || credentials.allRateLimited) {
@@ -273,8 +278,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       }
     }
 
-    // Use shared chatCore — reuse settings from the outer handleChat when provided
-    const chatSettings = settings || await getSettings();
+    // Use shared chatCore — settings already resolved above
     const providerThinking = (chatSettings.providerThinking || {})[provider] || null;
     const result = await handleChatCore({
       body: { ...body, model: `${provider}/${model}` },
