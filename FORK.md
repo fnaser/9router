@@ -40,7 +40,7 @@ Leave tunnels, Tailscale and the MITM proxy off in settings. They expose the das
 
 Mark each connection in **Providers → Edit → Account tier** (`personal` or `company`). Stored as `providerSpecificData.tier`. Name prefixes `[personal]` / `[company]` still work as a fallback. Untagged → personal.
 
-A future content classifier will prefer `company` accounts for sensitive prompts.
+**UI / policy metadata today** — the chat hot path does not filter by tier yet. A future content classifier will prefer `company` accounts for sensitive prompts.
 
 ## Use it
 
