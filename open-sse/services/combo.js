@@ -438,7 +438,7 @@ export function getComboModelsFromData(modelStr, combosData) {
  * @param {number|string} [options.comboStickyLimit=1] - Requests per combo model before switching
  * @param {Function} [options.shouldSkipModel] - (modelStr) => Promise<boolean>. True skips before the upstream call.
  * @param {Set<string>|null} [options.requiredCapabilities] - Precomputed capability set from the outer handler (avoids a second body scan).
- * @returns {Promise<Response>}
+ * @returns {Promise<Response>} After a full fallthrough, tries one more pass from the top (no sleep) before returning the all-failed response.
  */
 export async function handleComboChat({ body, models, handleSingleModel, log, comboName, comboStrategy, comboStickyLimit = 1, autoSwitch = true, shouldSkipModel = null, requiredCapabilities = null }) {
   // Apply rotation strategy if enabled
@@ -462,102 +462,114 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
   let earliestRetryAfter = null;
   let lastStatus = null;
 
-  for (let i = 0; i < rotatedModels.length; i++) {
-    const modelStr = rotatedModels[i];
-    log.info("COMBO", `Trying model ${i + 1}/${rotatedModels.length}: ${modelStr}`);
+  // Two passes max: after a full fallthrough, wrap once from the top with no
+  // sleep. Soft cools (~20s connect-timeout) may have expired while later legs
+  // ran, so the first model can succeed on the wrap. Billing locks will still
+  // fail/skip and we return the same all-failed response as a single pass.
+  const MAX_PASSES = 2;
 
-    if (typeof shouldSkipModel === "function") {
-      let skip = false;
-      try {
-        skip = await shouldSkipModel(modelStr);
-      } catch (error) {
-        log.warn("COMBO", `Utilization check failed for ${modelStr}`, { error: error?.message || String(error) });
-      }
-      if (skip) {
-        log.info("COMBO", `Model ${modelStr} at its utilization cap, trying next`);
-        if (!lastError) {
-          lastError = "utilization cap reached";
-          lastStatus = 503;
-        }
-        continue;
-      }
+  for (let pass = 1; pass <= MAX_PASSES; pass++) {
+    if (pass > 1) {
+      log.info("COMBO", "All models failed, wrapping once from the top");
     }
 
-    try {
-      const result = await handleSingleModel(body, modelStr);
-      
-      // Success (2xx) — but a 200 is not proof of a usable answer. A provider can
-      // open an SSE stream, send nothing but keepalives and close cleanly; that
-      // must fall through to the next model rather than be handed to the client.
-      if (result.ok) {
-        const { hasContent, body: replayBody } = await peekStreamForContent(result);
-        if (hasContent) {
-          log.info("COMBO", `Model ${modelStr} succeeded`);
-          if (!replayBody) return result;
-          return new Response(replayBody, {
-            status: result.status,
-            statusText: result.statusText,
-            headers: result.headers,
-          });
-        }
+    for (let i = 0; i < rotatedModels.length; i++) {
+      const modelStr = rotatedModels[i];
+      log.info("COMBO", `Trying model ${i + 1}/${rotatedModels.length}: ${modelStr} (pass ${pass}/${MAX_PASSES})`);
 
-        lastError = "provider returned an empty stream";
-        if (!lastStatus) lastStatus = 503;
-        log.warn("COMBO", `Model ${modelStr} returned an empty stream, trying next`);
-        continue;
+      if (typeof shouldSkipModel === "function") {
+        let skip = false;
+        try {
+          skip = await shouldSkipModel(modelStr);
+        } catch (error) {
+          log.warn("COMBO", `Utilization check failed for ${modelStr}`, { error: error?.message || String(error) });
+        }
+        if (skip) {
+          log.info("COMBO", `Model ${modelStr} at its utilization cap, trying next`);
+          if (!lastError) {
+            lastError = "utilization cap reached";
+            lastStatus = 503;
+          }
+          continue;
+        }
       }
 
-      // Extract error info from response
-      let errorText = result.statusText || "";
-      let retryAfter = null;
       try {
-        const errorBody = await result.clone().json();
-        errorText = errorBody?.error?.message || errorBody?.error || errorBody?.message || errorText;
-        retryAfter = errorBody?.retryAfter || null;
-      } catch {
-        // Ignore JSON parse errors
-      }
-      // Model responses carry the cooldown as a Retry-After header (seconds), not in the body.
-      if (!retryAfter) {
-        const retryAfterSec = Number(result.headers?.get?.("Retry-After"));
-        if (Number.isFinite(retryAfterSec) && retryAfterSec > 0) {
-          retryAfter = new Date(Date.now() + retryAfterSec * 1000).toISOString();
+        const result = await handleSingleModel(body, modelStr);
+
+        // Success (2xx) — but a 200 is not proof of a usable answer. A provider can
+        // open an SSE stream, send nothing but keepalives and close cleanly; that
+        // must fall through to the next model rather than be handed to the client.
+        if (result.ok) {
+          const { hasContent, body: replayBody } = await peekStreamForContent(result);
+          if (hasContent) {
+            log.info("COMBO", `Model ${modelStr} succeeded`);
+            if (!replayBody) return result;
+            return new Response(replayBody, {
+              status: result.status,
+              statusText: result.statusText,
+              headers: result.headers,
+            });
+          }
+
+          lastError = "provider returned an empty stream";
+          if (!lastStatus) lastStatus = 503;
+          log.warn("COMBO", `Model ${modelStr} returned an empty stream, trying next`);
+          continue;
         }
+
+        // Extract error info from response
+        let errorText = result.statusText || "";
+        let retryAfter = null;
+        try {
+          const errorBody = await result.clone().json();
+          errorText = errorBody?.error?.message || errorBody?.error || errorBody?.message || errorText;
+          retryAfter = errorBody?.retryAfter || null;
+        } catch {
+          // Ignore JSON parse errors
+        }
+        // Model responses carry the cooldown as a Retry-After header (seconds), not in the body.
+        if (!retryAfter) {
+          const retryAfterSec = Number(result.headers?.get?.("Retry-After"));
+          if (Number.isFinite(retryAfterSec) && retryAfterSec > 0) {
+            retryAfter = new Date(Date.now() + retryAfterSec * 1000).toISOString();
+          }
+        }
+
+        // Track earliest retryAfter across all combo models
+        if (retryAfter && (!earliestRetryAfter || new Date(retryAfter) < new Date(earliestRetryAfter))) {
+          earliestRetryAfter = retryAfter;
+        }
+
+        // Normalize error text to string (Worker-safe)
+        if (typeof errorText !== "string") {
+          try { errorText = JSON.stringify(errorText); } catch { errorText = String(errorText); }
+        }
+
+        // Check if should fallback to next model
+        const { shouldFallback } = checkFallbackError(result.status, errorText);
+
+        if (!shouldFallback) {
+          log.warn("COMBO", `Model ${modelStr} failed (no fallback)`, { status: result.status });
+          return result;
+        }
+
+        // Fall through immediately — do not sleep before the next combo model.
+
+        // Fallback to next model
+        lastError = errorText || String(result.status);
+        if (!lastStatus) lastStatus = result.status;
+        log.warn("COMBO", `Model ${modelStr} failed, trying next`, { status: result.status });
+      } catch (error) {
+        // Catch unexpected exceptions to ensure fallback continues
+        lastError = error.message || String(error);
+        if (!lastStatus) lastStatus = 500;
+        log.warn("COMBO", `Model ${modelStr} threw error, trying next`, { error: lastError });
       }
-
-      // Track earliest retryAfter across all combo models
-      if (retryAfter && (!earliestRetryAfter || new Date(retryAfter) < new Date(earliestRetryAfter))) {
-        earliestRetryAfter = retryAfter;
-      }
-
-      // Normalize error text to string (Worker-safe)
-      if (typeof errorText !== "string") {
-        try { errorText = JSON.stringify(errorText); } catch { errorText = String(errorText); }
-      }
-
-      // Check if should fallback to next model
-      const { shouldFallback } = checkFallbackError(result.status, errorText);
-
-      if (!shouldFallback) {
-        log.warn("COMBO", `Model ${modelStr} failed (no fallback)`, { status: result.status });
-        return result;
-      }
-
-      // Fall through immediately — do not sleep before the next combo model.
-
-      // Fallback to next model
-      lastError = errorText || String(result.status);
-      if (!lastStatus) lastStatus = result.status;
-      log.warn("COMBO", `Model ${modelStr} failed, trying next`, { status: result.status });
-    } catch (error) {
-      // Catch unexpected exceptions to ensure fallback continues
-      lastError = error.message || String(error);
-      if (!lastStatus) lastStatus = 500;
-      log.warn("COMBO", `Model ${modelStr} threw error, trying next`, { error: lastError });
     }
   }
 
-  // All models failed
+  // All models failed (both passes)
   // Use 503 (Service Unavailable) rather than 406 (Not Acceptable) — 406 implies
   // the request itself is invalid, but here the providers are simply unavailable
   // or have no active credentials. 503 is more accurate and retryable by clients.
