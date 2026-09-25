@@ -2,7 +2,7 @@
  * Shared combo (model combo) handling with fallback support
  */
 
-import { checkFallbackError, formatRetryAfter } from "./accountFallback.js";
+import { checkFallbackError, formatRetryAfter, pickPreferredFailureStatus } from "./accountFallback.js";
 import { unavailableResponse } from "../utils/error.js";
 import { getCapabilitiesForModel } from "../providers/capabilities.js";
 import { STREAM_FIRST_CHUNK_TIMEOUT_MS } from "../config/runtimeConfig.js";
@@ -468,8 +468,7 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
   // Prefer a real upstream status over a util-skip/empty 503; billing 402 always
   // wins. First non-503 otherwise sticks so a trailing 503 does not mask a 429.
   const noteFailureStatus = (code) => {
-    if (lastStatus == null || lastStatus === 503) lastStatus = code;
-    else if (code === 402) lastStatus = code;
+    lastStatus = pickPreferredFailureStatus(lastStatus, code);
   };
 
   // Two passes max: after a full fallthrough, wrap once from the top with no

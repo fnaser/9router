@@ -4,7 +4,7 @@
 // the first error. A 400 "maximum context length" from one session therefore
 // looked like the same failure in unrelated sessions.
 import { describe, expect, it } from "vitest";
-import { checkFallbackError } from "../../open-sse/services/accountFallback.js";
+import { checkFallbackError, pickPreferredFailureStatus } from "../../open-sse/services/accountFallback.js";
 
 describe("checkFallbackError — request-scoped vs account-scoped failures", () => {
   it("does not cool the account down for a 400 caused by the request", () => {
@@ -47,5 +47,27 @@ describe("checkFallbackError — request-scoped vs account-scoped failures", () 
 
     expect(result.shouldFallback).toBe(true);
     expect(result.cooldownMs).toBeGreaterThan(0);
+  });
+});
+
+describe("pickPreferredFailureStatus", () => {
+  it("takes the first status when none is set", () => {
+    expect(pickPreferredFailureStatus(null, 429)).toBe(429);
+    expect(pickPreferredFailureStatus(undefined, 502)).toBe(502);
+  });
+
+  it("lets a real upstream code replace a soft 503", () => {
+    expect(pickPreferredFailureStatus(503, 429)).toBe(429);
+    expect(pickPreferredFailureStatus(503, 402)).toBe(402);
+  });
+
+  it("lets billing 402 win over a prior 429", () => {
+    expect(pickPreferredFailureStatus(429, 402)).toBe(402);
+  });
+
+  it("keeps the first non-503 when the next is not billing", () => {
+    expect(pickPreferredFailureStatus(429, 503)).toBe(429);
+    expect(pickPreferredFailureStatus(429, 502)).toBe(429);
+    expect(pickPreferredFailureStatus(402, 429)).toBe(402);
   });
 });
