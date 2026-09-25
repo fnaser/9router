@@ -551,9 +551,13 @@ a last-good quota snapshot for up to 15 minutes after a timeout/soft failure.
 
 `open-sse/translator/formats/claude.js` deletes a client `safeguards` field on
 passthrough so Anthropic does not 400 with “Extra inputs are not permitted”
-and abort the combo. `ERROR_RULES` matches `fetch connect timeout` with
-`cooldownMs: 0`; `src/sse/services/auth.js` skips writing an account lock when
-cooldown is zero so the next account is tried immediately.
+and abort the combo. Synthetic `fetch connect timeout` 502s (headers/TTFT
+abort, not TCP) match `ERROR_RULES` with `CONNECT_TIMEOUT_SOFT_COOL_MS` (20s):
+`markAccountUnavailable` writes a brief `modelLock_*`, and `chat.js` trips the
+same connection in the in-process circuit. Combo `shouldSkipComboModel` skips
+the provider only when every active connection is tripped (and advertises
+`Retry-After`). Claude’s executor waits 60s for headers; other DefaultExecutor
+providers keep the global 15s.
 
 ### Cursor usage and session probe
 
