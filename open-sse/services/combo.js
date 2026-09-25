@@ -461,21 +461,41 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
   let lastError = null;
   let earliestRetryAfter = null;
   let lastStatus = null;
+  // Models that failed with a terminal billing/credit state this request — no
+  // point re-hitting them on the wrap pass (e.g. xAI 402 spending-limit).
+  const terminalModels = new Set();
+
+  // Prefer a real upstream status over a util-skip/empty 503; billing 402 always
+  // wins. First non-503 otherwise sticks so a trailing 503 does not mask a 429.
+  const noteFailureStatus = (code) => {
+    if (lastStatus == null || lastStatus === 503) lastStatus = code;
+    else if (code === 402) lastStatus = code;
+  };
 
   // Two passes max: after a full fallthrough, wrap once from the top with no
-  // sleep. Soft cools (~20s connect-timeout) may have expired while later legs
-  // ran, so the first model can succeed on the wrap. Billing locks will still
-  // fail/skip and we return the same all-failed response as a single pass.
+  // sleep so a leg that was only soft-cooled / skipped can be tried again.
+  // Terminal billing failures are not re-attempted on the wrap. Wrap-pass
+  // failures do not rewrite lastStatus (pass 1 outcome stays client-facing).
   const MAX_PASSES = 2;
 
   for (let pass = 1; pass <= MAX_PASSES; pass++) {
     if (pass > 1) {
+      const anyRetryable = rotatedModels.some((m) => !terminalModels.has(m));
+      if (!anyRetryable) {
+        log.info("COMBO", "Skipping wrap: every model failed with a terminal billing error");
+        break;
+      }
       log.info("COMBO", "All models failed, wrapping once from the top");
     }
 
     for (let i = 0; i < rotatedModels.length; i++) {
       const modelStr = rotatedModels[i];
       log.info("COMBO", `Trying model ${i + 1}/${rotatedModels.length}: ${modelStr} (pass ${pass}/${MAX_PASSES})`);
+
+      if (pass > 1 && terminalModels.has(modelStr)) {
+        log.info("COMBO", `Model ${modelStr} already failed with terminal billing, skipping wrap`);
+        continue;
+      }
 
       if (typeof shouldSkipModel === "function") {
         let skip = false;
@@ -513,7 +533,7 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
           }
 
           lastError = "provider returned an empty stream";
-          if (!lastStatus) lastStatus = 503;
+          if (pass === 1) noteFailureStatus(503);
           log.warn("COMBO", `Model ${modelStr} returned an empty stream, trying next`);
           continue;
         }
@@ -547,7 +567,7 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
         }
 
         // Check if should fallback to next model
-        const { shouldFallback } = checkFallbackError(result.status, errorText);
+        const { shouldFallback, terminal } = checkFallbackError(result.status, errorText);
 
         if (!shouldFallback) {
           log.warn("COMBO", `Model ${modelStr} failed (no fallback)`, { status: result.status });
@@ -556,14 +576,14 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
 
         // Fall through immediately — do not sleep before the next combo model.
 
-        // Fallback to next model
         lastError = errorText || String(result.status);
-        if (!lastStatus) lastStatus = result.status;
+        if (pass === 1) noteFailureStatus(result.status);
+        if (terminal) terminalModels.add(modelStr);
         log.warn("COMBO", `Model ${modelStr} failed, trying next`, { status: result.status });
       } catch (error) {
         // Catch unexpected exceptions to ensure fallback continues
         lastError = error.message || String(error);
-        if (!lastStatus) lastStatus = 500;
+        if (pass === 1) noteFailureStatus(500);
         log.warn("COMBO", `Model ${modelStr} threw error, trying next`, { error: lastError });
       }
     }
