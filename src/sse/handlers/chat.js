@@ -29,8 +29,8 @@ import { tripProvider, clearProviderTrip } from "../services/providerCircuit.js"
 
 /**
  * Route a named combo (or fusion) through the shared combo handlers.
- * Used from handleChat and from handleSingleModelChat when the model string
- * resolves to a combo rather than provider/model.
+ * Used from handleChat, and from handleSingleModelChat when a combo leg is
+ * itself another combo name (nested combo).
  */
 function routeComboChat({
   body,
@@ -121,8 +121,6 @@ export async function handleChat(request, clientRawRequest = null) {
   const { model: modelStr, contextMarker } = stripModelContextMarker(body.model);
   if (contextMarker) body.model = modelStr;
 
-  // Request summary is emitted as the unified "▶" line in chatCore (has fmt/thinking/account)
-
   // Log API key (masked)
   const authHeader = request.headers.get("Authorization");
   const apiKey = extractApiKey(request);
@@ -205,7 +203,8 @@ export async function handleChat(request, clientRawRequest = null) {
 async function handleSingleModelChat(body, modelStr, clientRawRequest = null, request = null, apiKey = null, settings = null) {
   const modelInfo = await getModelInfo(modelStr);
 
-  // If provider is null, this might be a combo name - check and handle
+  // Nested combo leg: a combo's models[] entry can be another combo name
+  // (no slash). Expand via routeComboChat. Normal provider/model legs skip this.
   if (!modelInfo.provider) {
     const comboModels = await getComboModels(modelStr);
     if (comboModels) {
@@ -226,8 +225,6 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
   }
 
   const { provider, model } = modelInfo;
-
-  // Routing shown in the unified "▶" line (client model → provider/model)
 
   // Extract userAgent from request
   const userAgent = request?.headers?.get("user-agent") || "";
@@ -256,7 +253,6 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       return errorResponse(lastStatus || HTTP_STATUS.SERVICE_UNAVAILABLE, lastError || "All accounts unavailable");
     }
 
-    // Account selection shown in the unified "▶" line (acc:...)
     const refreshedCredentials = await checkAndRefreshToken(provider, credentials);
 
     // Ensure real project ID is available for providers that need it (P0 fix: cold miss)
