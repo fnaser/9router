@@ -504,7 +504,16 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
           log.warn("COMBO", `Utilization check failed for ${modelStr}`, { error: error?.message || String(error) });
         }
         if (skip) {
-          const reason = typeof skip === "string" ? skip : "utilization cap";
+          const reason = typeof skip === "string" ? skip : (skip.reason || "utilization cap");
+          const retryMs = typeof skip === "object" && Number(skip.retryAfterMs) > 0
+            ? Number(skip.retryAfterMs)
+            : 0;
+          if (retryMs > 0) {
+            const until = new Date(Date.now() + retryMs).toISOString();
+            if (!earliestRetryAfter || new Date(until) < new Date(earliestRetryAfter)) {
+              earliestRetryAfter = until;
+            }
+          }
           log.info("COMBO", `Model ${modelStr} skipped (${reason}), trying next`);
           if (!lastError) {
             lastError = reason;
@@ -761,7 +770,7 @@ async function dropCappedModels(models, shouldSkipModel, log) {
       log.warn("FUSION", `Utilization check failed for ${model}`, { error: error?.message || String(error) });
     }
     if (skip) {
-      const reason = typeof skip === "string" ? skip : "utilization cap";
+      const reason = typeof skip === "string" ? skip : (skip.reason || "utilization cap");
       log.info("FUSION", `Model ${model} skipped (${reason}), leaving it out`);
     } else {
       kept.push(model);
@@ -828,7 +837,7 @@ export async function handleFusionChat({ body, models, handleSingleModel, log, c
       log.warn("FUSION", `Utilization check failed for judge ${judge}`, { error: error?.message || String(error) });
     }
     if (judgeSkipped) {
-      const reason = typeof judgeSkipped === "string" ? judgeSkipped : "utilization cap";
+      const reason = typeof judgeSkipped === "string" ? judgeSkipped : (judgeSkipped.reason || "utilization cap");
       log.info("FUSION", `Judge ${judge} skipped (${reason}), using ${panel[0]}`);
       judge = panel[0];
     }

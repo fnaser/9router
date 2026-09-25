@@ -3,6 +3,7 @@ import {
   tripProvider,
   isProviderTripped,
   clearProviderTrip,
+  getProviderTripRemainingMs,
   _resetProviderCircuitForTests,
   _tripUntilForTests,
 } from "../../src/sse/services/providerCircuit.js";
@@ -43,5 +44,13 @@ describe("providerCircuit", () => {
     const first = _tripUntilForTests("claude");
     tripProvider("claude", 20_000);
     expect(_tripUntilForTests("claude")).toBeGreaterThan(first);
+  });
+
+  it("reports remaining trip milliseconds", () => {
+    tripProvider("claude", 10_000);
+    expect(getProviderTripRemainingMs("claude")).toBeGreaterThan(9_000);
+    expect(getProviderTripRemainingMs("claude")).toBeLessThanOrEqual(10_000);
+    vi.advanceTimersByTime(10_001);
+    expect(getProviderTripRemainingMs("claude")).toBe(0);
   });
 });

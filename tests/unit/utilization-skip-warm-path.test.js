@@ -72,7 +72,8 @@ describe("utilizationSkip warm path", () => {
     getProviderConnections.mockResolvedValue([{ id: "a1", provider: "claude", isActive: true }]);
 
     const skip = await shouldSkipComboModel("cc/claude-opus-4-6");
-    expect(skip).toBe("provider circuit");
+    expect(skip).toEqual({ reason: "provider circuit", retryAfterMs: expect.any(Number) });
+    expect(skip.retryAfterMs).toBeGreaterThan(50_000);
     expect(getUsageForProvider).not.toHaveBeenCalled();
     _resetProviderCircuitForTests();
   });
