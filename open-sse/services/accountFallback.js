@@ -1,6 +1,20 @@
 import { ERROR_RULES, BACKOFF_CONFIG, TRANSIENT_COOLDOWN_MS } from "../config/errorConfig.js";
 
 /**
+ * Prefer a real upstream status over a soft 503; billing 402 always wins.
+ * Used by combo fallthrough and the per-provider account loop so a util-skip
+ * or trailing rate-limit does not mask a terminal payment error.
+ * @param {number|null|undefined} prev
+ * @param {number} next
+ * @returns {number}
+ */
+export function pickPreferredFailureStatus(prev, next) {
+  if (prev == null || prev === 503) return next;
+  if (next === 402) return next;
+  return prev;
+}
+
+/**
  * Calculate exponential backoff cooldown for rate limits (429)
  * Level 1: 1s, Level 2: 2s, Level 3: 4s... → max 4 min
  * @param {number} backoffLevel - Current backoff level
