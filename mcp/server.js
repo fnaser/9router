@@ -2,15 +2,20 @@
 /**
  * 9router MCP server — expose subscription models as tools for Codex / Claude Code / Cursor.
  *
- * Env (optional; key also loaded from ~/.9router/claude-env.sh):
+ * Env (optional):
  *   NINEROUTER_BASE_URL   default http://127.0.0.1:20127
  *   NINEROUTER_API_KEY    or ANTHROPIC_AUTH_TOKEN
  *   NINEROUTER_MCP_DEFAULT_MODEL  default cc/claude-opus-5-5
+ *   DATA_DIR              override ~/.9router for SQLite key lookup
+ *
+ * Key resolution order: NINEROUTER_API_KEY → ANTHROPIC_AUTH_TOKEN →
+ * ~/.9router/claude-env.sh → first active key in DATA_DIR/db/data.sqlite
  */
 
 import { readFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as z from "zod/v4";
@@ -19,8 +24,12 @@ const DEFAULT_BASE = "http://127.0.0.1:20127";
 const DEFAULT_MODEL = "cc/claude-opus-5-5";
 const REQUEST_TIMEOUT_MS = Number(process.env.NINEROUTER_MCP_TIMEOUT_MS) || 180_000;
 
+function dataDir() {
+  return process.env.DATA_DIR || join(homedir(), ".9router");
+}
+
 function loadKeyFromClaudeEnv() {
-  const path = join(homedir(), ".9router", "claude-env.sh");
+  const path = join(dataDir(), "claude-env.sh");
   if (!existsSync(path)) return "";
   try {
     const text = readFileSync(path, "utf8");
@@ -31,19 +40,55 @@ function loadKeyFromClaudeEnv() {
   }
 }
 
+/** First active dashboard API key (same store the gateway authenticates against). */
+function loadKeyFromSqlite() {
+  const dbPath = join(dataDir(), "db", "data.sqlite");
+  if (!existsSync(dbPath)) return "";
+  let db;
+  try {
+    db = new DatabaseSync(dbPath, { readOnly: true });
+    const row = db
+      .prepare(
+        `SELECT key FROM apiKeys WHERE isActive = 1 AND key IS NOT NULL AND key != ''
+         ORDER BY createdAt ASC LIMIT 1`
+      )
+      .get();
+    return typeof row?.key === "string" ? row.key.trim() : "";
+  } catch {
+    return "";
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function resolveApiKey() {
+  return (
+    process.env.NINEROUTER_API_KEY?.trim() ||
+    process.env.ANTHROPIC_AUTH_TOKEN?.trim() ||
+    loadKeyFromClaudeEnv() ||
+    loadKeyFromSqlite() ||
+    ""
+  );
+}
+
+let cachedConfig = null;
+
 function config() {
+  if (cachedConfig) return cachedConfig;
   const baseUrl = (process.env.NINEROUTER_BASE_URL || DEFAULT_BASE).replace(/\/$/, "");
-  const apiKey =
-    process.env.NINEROUTER_API_KEY ||
-    process.env.ANTHROPIC_AUTH_TOKEN ||
-    loadKeyFromClaudeEnv();
+  const apiKey = resolveApiKey();
   const defaultModel = process.env.NINEROUTER_MCP_DEFAULT_MODEL || DEFAULT_MODEL;
   if (!apiKey) {
     throw new Error(
-      "No API key: set NINEROUTER_API_KEY or ANTHROPIC_AUTH_TOKEN, or put it in ~/.9router/claude-env.sh"
+      "No API key: set NINEROUTER_API_KEY / ANTHROPIC_AUTH_TOKEN, add ~/.9router/claude-env.sh, or create an active key in the 9router dashboard (db/data.sqlite)"
     );
   }
-  return { baseUrl, apiKey, defaultModel };
+  cachedConfig = { baseUrl, apiKey, defaultModel };
+  return cachedConfig;
 }
 
 async function gatewayFetch(path, { method = "GET", body } = {}) {
@@ -229,7 +274,7 @@ server.registerTool(
   {
     title: "Ask Claude via 9router",
     description:
-      "Convenience wrapper for delegate() with model cc/claude-opus-5-5 (override with NINEROUTER_MCP_DEFAULT_MODEL or pass model on delegate). Use from Codex when you want Claude Opus to implement a step.",
+      "Convenience wrapper for delegate() pinned to Claude Opus (NINEROUTER_MCP_CLAUDE_MODEL, else cc/claude-opus-5-5). Use from Codex when you want Claude to implement a step.",
     inputSchema: {
       task: z.string().describe("Task for Claude."),
       context: z.string().optional().describe("Optional supporting context."),

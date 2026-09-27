@@ -70,6 +70,7 @@ cwd = "/Users/YOU/9router/mcp"
 tool_timeout_sec = 300
 ```
 
+API key is resolved automatically from env, `~/.9router/claude-env.sh`, or the first active dashboard key in SQLite. Optional: set `NINEROUTER_API_KEY` under `[mcp_servers.ninerouter.env]`.
 Claude Desktop: Help → Troubleshooting → Enable Developer Mode, then Developer → Configure Third-Party Inference…. Set provider `gateway`, base URL `http://127.0.0.1:20127/v1`, your key, and list the combo name under models. This switches the app off your Anthropic account and keeps history on the machine. Prefer this window over the "Claude Cowork" card in 9router's CLI Tools page, which also loosens Desktop's security settings.
 
 ## Keep it running (macOS)

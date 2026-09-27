@@ -15,10 +15,16 @@ Usage limits still apply inside 9router (util skip, locks, circuit, combo fallth
 ## Setup
 
 ```bash
-cd ~/9router/mcp && npm install
+cd ~/9router/mcp && npm install   # Node ≥ 22.5 (node:sqlite)
 ```
 
-Needs 9router running on `127.0.0.1:20127` and an API key in `~/.9router/claude-env.sh` (`ANTHROPIC_AUTH_TOKEN`) or `NINEROUTER_API_KEY`.
+Needs 9router running on `127.0.0.1:20127`.
+
+**API key** (first match wins):
+
+1. `NINEROUTER_API_KEY` or `ANTHROPIC_AUTH_TOKEN` in the process env  
+2. `~/.9router/claude-env.sh` (`export ANTHROPIC_AUTH_TOKEN=…`)  
+3. First **active** key in `~/.9router/db/data.sqlite` (dashboard Endpoint keys)
 
 ### Codex Desktop / CLI (`~/.codex/config.toml`)
 
@@ -29,6 +35,9 @@ args = ["/Users/YOU/9router/mcp/server.js"]
 cwd = "/Users/YOU/9router/mcp"
 startup_timeout_sec = 20
 tool_timeout_sec = 300
+# Optional if you do not use claude-env.sh / dashboard SQLite:
+# [mcp_servers.ninerouter.env]
+# NINEROUTER_API_KEY = "sk-…"
 ```
 
 Restart Codex (or reload MCP). In a session, ask it to use `ask_claude` / `delegate` for an implementation step.
@@ -51,20 +60,17 @@ Restart Codex (or reload MCP). In a session, ask it to use `ask_claude` / `deleg
 | Var | Default |
 |---|---|
 | `NINEROUTER_BASE_URL` | `http://127.0.0.1:20127` |
-| `NINEROUTER_API_KEY` / `ANTHROPIC_AUTH_TOKEN` | from `~/.9router/claude-env.sh` |
+| `NINEROUTER_API_KEY` / `ANTHROPIC_AUTH_TOKEN` | else claude-env.sh, else SQLite |
+| `DATA_DIR` | `~/.9router` |
 | `NINEROUTER_MCP_DEFAULT_MODEL` | `cc/claude-opus-5-5` |
-| `NINEROUTER_MCP_CLAUDE_MODEL` | same as ask_claude target |
+| `NINEROUTER_MCP_CLAUDE_MODEL` | ask_claude target |
 | `NINEROUTER_MCP_TIMEOUT_MS` | `180000` |
 
 ## Smoke test
 
 ```bash
-cd ~/9router/mcp
-node --input-type=module -e '
-import { spawn } from "node:child_process";
-// Prefer a real MCP client; quick path: call gateway helpers by running list via curl
-'
-curl -s -H "Authorization: Bearer $ANTHROPIC_AUTH_TOKEN" http://127.0.0.1:20127/v1/models | head -c 200
+cd ~/9router/mcp && npm run smoke
+# expects: tools listed, ask_claude → ok
 ```
 
 Or from Codex: “Use the ninerouter ask_claude tool to explain what 2+2 is in one sentence.”
