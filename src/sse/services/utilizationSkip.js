@@ -9,6 +9,10 @@ import { getProviderConnections } from "@/lib/localDb";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { checkAndRefreshToken } from "./tokenRefresh.js";
 import { getAllConnectionsTrip } from "./providerCircuit.js";
+import {
+  connectionMatchesRequiredTier,
+  resolveRequiredAccountTier,
+} from "@/shared/utils/connectionTier.js";
 
 const CACHE_MS = 3 * 60 * 1000;
 const FAILURE_CACHE_MS = 60 * 1000;
@@ -175,6 +179,13 @@ export async function shouldSkipComboModel(modelStr) {
     return false;
   }
   if (!Array.isArray(connections) || connections.length === 0) return false;
+
+  // Env FORK_ACCOUNT_TIER=company|personal — header-based force is applied in
+  // getProviderCredentials (combo still falls through if this early check misses).
+  const requiredTier = resolveRequiredAccountTier({});
+  if (requiredTier && !connections.some((c) => connectionMatchesRequiredTier(c, requiredTier))) {
+    return `no ${requiredTier} accounts`;
+  }
 
   // Parallel turns: after connect timeouts, skip only when every active
   // connection is tripped — a healthy sibling account can still be tried.

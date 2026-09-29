@@ -3,6 +3,7 @@ import { resolveConnectionProxyConfig, pickProxyPoolId } from "@/lib/network/con
 import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil } from "open-sse/services/accountFallback.js";
 import { MAX_RATE_LIMIT_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
 import { resolveProviderId, FREE_PROVIDERS } from "@/shared/constants/providers.js";
+import { connectionMatchesRequiredTier } from "@/shared/utils/connectionTier.js";
 import { getAntigravityQuotaCache } from "./antigravityQuota.js";
 import * as log from "../utils/logger.js";
 
@@ -27,6 +28,7 @@ function githubMonthlyResetMs(status, errorText, provider) {
  * @param {object} [options]
  * @param {string|null} [options.preferredConnectionId]
  * @param {object|null} [options.settings] - Preloaded settings (avoids a SQLite round-trip per account attempt)
+ * @param {"company"|"personal"|null} [options.requiredTier] - When set, only connections of that tier
  */
 export async function getProviderCredentials(provider, excludeConnectionIds = null, model = null, options = {}) {
   // Normalize to Set for consistent handling
@@ -34,6 +36,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     ? excludeConnectionIds
     : (excludeConnectionIds ? new Set([excludeConnectionIds]) : new Set());
   const preferredConnectionId = options?.preferredConnectionId || null;
+  const requiredTier = options?.requiredTier || null;
   // Acquire mutex to prevent race conditions
   const currentMutex = selectionMutex;
   let resolveMutex;
@@ -47,6 +50,10 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
 
     // Inject a virtual connection for no-auth free providers (with optional proxy pool from settings)
     if (FREE_PROVIDERS[providerId]?.noAuth) {
+      if (requiredTier === "company") {
+        log.warn("AUTH", `${provider} | noauth provider cannot satisfy requiredTier=company`);
+        return null;
+      }
       const settings = options.settings || await getSettings();
       const override = (settings.providerStrategies || {})[providerId] || {};
       const strategy = override.rotateStrategy || "none";
@@ -84,9 +91,10 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     const isAntigravity = providerId === "antigravity";
     const antigravityQuotaCache = isAntigravity && model ? getAntigravityQuotaCache() : null;
 
-    // Filter out model-locked, excluded, and Antigravity quota-exhausted connections.
+    // Filter out model-locked, excluded, wrong-tier, and Antigravity quota-exhausted connections.
     const availableConnections = connections.filter(c => {
       if (excludeSet.has(c.id)) return false;
+      if (!connectionMatchesRequiredTier(c, requiredTier)) return false;
       if (isModelLockActive(c, model)) return false;
       // Antigravity: skip if live quota exhausted for this model
       if (isAntigravity && model && antigravityQuotaCache) {
@@ -100,17 +108,22 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
       return true;
     });
 
-    log.debug("AUTH", `${provider} | available: ${availableConnections.length}/${connections.length}`);
+    log.debug("AUTH", `${provider} | available: ${availableConnections.length}/${connections.length}${requiredTier ? ` (tier=${requiredTier})` : ""}`);
     connections.forEach(c => {
       const excluded = excludeSet.has(c.id);
       const locked = isModelLockActive(c, model);
-      if (excluded || locked) {
+      const wrongTier = !connectionMatchesRequiredTier(c, requiredTier);
+      if (excluded || locked || wrongTier) {
         const lockUntil = getEarliestModelLockUntil(c);
-        log.debug("AUTH", `  → ${c.id?.slice(0, 8)} | ${excluded ? "excluded" : ""} ${locked ? `modelLocked(${model}) until ${lockUntil}` : ""}`);
+        log.debug("AUTH", `  → ${c.id?.slice(0, 8)} | ${excluded ? "excluded" : ""} ${locked ? `modelLocked(${model}) until ${lockUntil}` : ""} ${wrongTier ? `tier≠${requiredTier}` : ""}`);
       }
     });
 
     if (availableConnections.length === 0) {
+      if (requiredTier && !connections.some((c) => connectionMatchesRequiredTier(c, requiredTier))) {
+        log.warn("AUTH", `${provider} | no ${requiredTier}-tier accounts (of ${connections.length})`);
+        return null;
+      }
       // Find earliest persistent lock or lazy Antigravity quota-cache reset for retry timing.
       const lockedConns = connections.filter(c => isModelLockActive(c, model));
       const expiries = lockedConns.map(c => getEarliestModelLockUntil(c)).filter(Boolean);

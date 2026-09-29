@@ -27,6 +27,7 @@ import { getProjectIdForConnection } from "open-sse/services/projectId.js";
 import { stripModelContextMarker } from "open-sse/utils/modelMarkers.js";
 import { shouldSkipComboModel } from "../services/utilizationSkip.js";
 import { tripConnection, clearConnectionTrip } from "../services/providerCircuit.js";
+import { resolveRequiredAccountTier } from "@/shared/utils/connectionTier.js";
 
 /**
  * Route a named combo (or fusion) through the shared combo handlers.
@@ -232,6 +233,9 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
 
   // Prefer settings loaded in handleChat; one load for the whole account loop.
   const chatSettings = settings || await getSettings();
+  const requiredTier = resolveRequiredAccountTier({
+    headers: request?.headers || clientRawRequest?.headers,
+  });
 
   // Try with available accounts (fallback on errors)
   const excludeConnectionIds = new Set();
@@ -244,6 +248,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
   while (true) {
     const credentials = await getProviderCredentials(provider, excludeConnectionIds, model, {
       settings: chatSettings,
+      requiredTier,
     });
 
     // All accounts unavailable
@@ -256,8 +261,13 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         return unavailableResponse(status, `[${provider}/${model}] ${errorMsg}`, credentials.retryAfter, credentials.retryAfterHuman);
       }
       if (excludeConnectionIds.size === 0) {
-        log.warn("AUTH", `No active credentials for provider: ${provider}`);
-        return errorResponse(HTTP_STATUS.NOT_FOUND, `No active credentials for provider: ${provider}`);
+        log.warn("AUTH", `No active credentials for provider: ${provider}${requiredTier ? ` (tier=${requiredTier})` : ""}`);
+        return errorResponse(
+          HTTP_STATUS.NOT_FOUND,
+          requiredTier
+            ? `No ${requiredTier}-tier credentials for provider: ${provider}`
+            : `No active credentials for provider: ${provider}`
+        );
       }
       log.warn("CHAT", "No more accounts available", { provider });
       return errorResponse(

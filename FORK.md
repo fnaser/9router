@@ -41,7 +41,7 @@ Leave tunnels, Tailscale and the MITM proxy off in settings. They expose the das
 
 Mark each connection in **Providers → Edit → Account tier** (`personal` or `company`). Stored as `providerSpecificData.tier`. Name prefixes `[personal]` / `[company]` still work as a fallback. Untagged → personal.
 
-**UI / policy metadata today** — the chat hot path does not filter by tier yet. A future content classifier will prefer `company` accounts for sensitive prompts.
+**Hot path:** set header `x-9router-account-tier: company` (or env `FORK_ACCOUNT_TIER=company`) to only use company-tier accounts. Missing company accounts → that provider fails / combo falls through. Default is no filter. A future LFM classifier can set the same header when a prompt looks sensitive.
 
 ## Use it
 
