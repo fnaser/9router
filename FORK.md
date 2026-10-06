@@ -41,7 +41,15 @@ Leave tunnels, Tailscale and the MITM proxy off in settings. They expose the das
 
 Mark each connection in **Providers → Edit → Account tier** (`personal` or `company`). Stored as `providerSpecificData.tier`. Name prefixes `[personal]` / `[company]` still work as a fallback. Untagged → personal.
 
-**Hot path:** set header `x-9router-account-tier: company` (or env `FORK_ACCOUNT_TIER=company`) to only use company-tier accounts. Missing company accounts → that provider fails / combo falls through. Default is no filter. A future LFM classifier can set the same header when a prompt looks sensitive.
+**Hot path:** set header `x-9router-account-tier: company` (or env `FORK_ACCOUNT_TIER=company`) to only use company-tier accounts. Missing company accounts → that provider fails / combo falls through. Default is no filter.
+
+**Optional PII sidecar:** run [`pii-gate/`](./pii-gate/README.md) ([Liquid LFM2.5-Encoder-350M-PII-Detector](https://huggingface.co/LiquidAI/LFM2.5-Encoder-350M-PII-Detector)), then:
+
+```bash
+export FORK_PII_GATE_URL=http://127.0.0.1:20129/classify
+```
+
+When the gate marks a short prompt head as sensitive, the gateway forces company tier (same as the header). Explicit header/env still wins. Gate down or slow → fail-open (no filter).
 
 ## Use it
 

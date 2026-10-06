@@ -28,6 +28,7 @@ import { stripModelContextMarker } from "open-sse/utils/modelMarkers.js";
 import { shouldSkipComboModel } from "../services/utilizationSkip.js";
 import { tripConnection, clearConnectionTrip } from "../services/providerCircuit.js";
 import { resolveRequiredAccountTier } from "@/shared/utils/connectionTier.js";
+import { probePiiGate } from "../services/piiGate.js";
 
 /**
  * Route a named combo (or fusion) through the shared combo handlers.
@@ -43,6 +44,7 @@ function routeComboChat({
   request,
   apiKey,
   requiredCapabilities,
+  requiredTier = null,
 }) {
   const comboStrategies = settings.comboStrategies || {};
   const comboSpecificStrategy = comboStrategies[modelStr]?.fallbackStrategy;
@@ -59,7 +61,7 @@ function routeComboChat({
       const { tools, tool_choice, ...cleanBody } = clientRawRequest.body || {};
       cleanRawReq = { ...clientRawRequest, body: cleanBody };
     }
-    return handleSingleModelChat(b, m, cleanRawReq || clientRawRequest, request, apiKey, settings);
+    return handleSingleModelChat(b, m, cleanRawReq || clientRawRequest, request, apiKey, settings, requiredTier);
   };
 
   if (comboStrategy === "fusion") {
@@ -82,7 +84,7 @@ function routeComboChat({
     body,
     models: augmentedModels,
     handleSingleModel: withCapacityAdapterStripping(
-      (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, settings),
+      (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, settings, requiredTier),
       adapterAdded
     ),
     log,
@@ -159,6 +161,21 @@ export async function handleChat(request, clientRawRequest = null) {
 
   const requiredCapabilities = detectRequiredCapabilities(body);
 
+  // Explicit header/env tier wins; else optional PII sidecar may force company.
+  let requiredTier = resolveRequiredAccountTier({
+    headers: request?.headers || clientRawRequest?.headers,
+  });
+  if (!requiredTier) {
+    const pii = await probePiiGate(body, { log });
+    if (pii?.sensitive) {
+      requiredTier = "company";
+      log.info(
+        "PII_GATE",
+        `sensitive → require company tier${pii.types?.length ? ` (${pii.types.slice(0, 6).join(",")})` : ""}`
+      );
+    }
+  }
+
   // Check if model is a combo (has multiple models with fallback)
   const comboModels = await getComboModels(modelStr);
   if (comboModels) {
@@ -171,6 +188,7 @@ export async function handleChat(request, clientRawRequest = null) {
       request,
       apiKey,
       requiredCapabilities,
+      requiredTier,
     });
   }
 
@@ -184,7 +202,7 @@ export async function handleChat(request, clientRawRequest = null) {
       body,
       models: soloAugmented,
       handleSingleModel: withCapacityAdapterStripping(
-        (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, settings),
+        (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, settings, requiredTier),
         adapterAdded
       ),
       log,
@@ -195,14 +213,15 @@ export async function handleChat(request, clientRawRequest = null) {
     });
   }
 
-  return handleSingleModelChat(body, modelStr, clientRawRequest, request, apiKey, settings);
+  return handleSingleModelChat(body, modelStr, clientRawRequest, request, apiKey, settings, requiredTier);
 }
 
 /**
  * Handle single model chat request
  * @param {object|null} [settings] - Prefer the already-loaded settings from handleChat
+ * @param {"company"|"personal"|null} [requiredTier]
  */
-async function handleSingleModelChat(body, modelStr, clientRawRequest = null, request = null, apiKey = null, settings = null) {
+async function handleSingleModelChat(body, modelStr, clientRawRequest = null, request = null, apiKey = null, settings = null, requiredTier = null) {
   const modelInfo = await getModelInfo(modelStr);
 
   // Nested combo leg: a combo's models[] entry can be another combo name
@@ -220,6 +239,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         request,
         apiKey,
         requiredCapabilities: detectRequiredCapabilities(body),
+        requiredTier,
       });
     }
     log.warn("CHAT", "Invalid model format", { model: modelStr });
@@ -233,9 +253,11 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
 
   // Prefer settings loaded in handleChat; one load for the whole account loop.
   const chatSettings = settings || await getSettings();
-  const requiredTier = resolveRequiredAccountTier({
-    headers: request?.headers || clientRawRequest?.headers,
-  });
+  if (requiredTier == null) {
+    requiredTier = resolveRequiredAccountTier({
+      headers: request?.headers || clientRawRequest?.headers,
+    });
+  }
 
   // Try with available accounts (fallback on errors)
   const excludeConnectionIds = new Set();
