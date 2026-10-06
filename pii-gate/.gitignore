@@ -1,0 +1,5 @@
+# Local venv / caches (not committed)
+.venv/
+__pycache__/
+*.pyc
+.cache/
